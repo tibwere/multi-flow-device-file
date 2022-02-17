@@ -1,0 +1,34 @@
+#!/bin/bash
+
+usage() {
+  echo -e "Usage ${0} -n <device-name> [-m <minor-number> (default: 0)]"
+}
+
+[ "$EUID" -ne 0 ] && echo "This script must be run as root!" && exit 1
+[ "$#" -eq 1 ] && [ "${1}" -eq "-h" ] && usage && exit 0
+
+MODULENAME="multi_flow_device_file" # Change this according to module name!
+MAJORNUMBER=$(cat /sys/module/${MODULENAME}/parameters/major 2>/dev/null)
+MINORNUMBER=0
+
+[ -z ${MAJORNUMBER} ] && echo "Mount module first, then re-run this script" && exit 2
+
+unset MFDF_NAME
+
+while getopts ":m:n:" opt; do
+  case ${opt} in
+    m )
+      MINORNUMBER=${OPTARG}
+      ;;
+    n)
+      MFDF_NAME=${OPTARG}
+      ;;
+    ?)
+      usage && exit 3
+  esac
+done
+
+[ -z ${MFDF_NAME} ] && usage && exit 3
+
+/usr/bin/mknod /dev/${MFDF_NAME} c ${MAJORNUMBER} ${MINORNUMBER}
+echo "Device /dev/${MFDF_NAME} successfully created!" 
