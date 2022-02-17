@@ -1,7 +1,7 @@
 #!/bin/bash
 
 usage() {
-  echo -e "Usage ${0} -n <device-name> [-m <minor-number> (default: 0)]"
+    echo -e "Usage ${0} -n <device-name> [-m <minor-number> (default: 0)]"
 }
 
 [ "$EUID" -ne 0 ] && echo "This script must be run as root!" && exit 1
@@ -16,16 +16,16 @@ MINORNUMBER=0
 unset MFDF_NAME
 
 while getopts ":m:n:" opt; do
-  case ${opt} in
-    m )
-      MINORNUMBER=${OPTARG}
-      ;;
-    n)
-      MFDF_NAME=${OPTARG}
-      ;;
-    ?)
-      usage && exit 3
-  esac
+    case ${opt} in
+        m )
+            MINORNUMBER=${OPTARG}
+            ;;
+        n)
+            MFDF_NAME=${OPTARG}
+            ;;
+        ?)
+            usage && exit 3
+    esac
 done
 
 [ -z ${MFDF_NAME} ] && usage && exit 3
