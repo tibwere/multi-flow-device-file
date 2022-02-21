@@ -7,6 +7,8 @@ CFLAGS = -I$(IDIR) -Wall -Wextra
 SOURCES = ./user/test.c ./user/lib/mfdf.c
 BIN = ./user/tester
 
+all: module tester
+
 module:
 	make -C /lib/modules/$(shell uname -r)/build M=$(shell pwd) modules
 
