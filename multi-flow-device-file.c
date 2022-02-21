@@ -8,6 +8,7 @@
 #include <linux/tty.h>
 #include <linux/version.h>
 #include <linux/string.h>
+#include <linux/slab.h>
 
 
 /* Module informations */
@@ -47,6 +48,7 @@ struct data_flow {
     char *buffer;
     int read_offset;
     int write_offset;
+    int available_space;
 };
 
 struct device_state {
@@ -58,10 +60,20 @@ struct device_state {
 #define ACTIVE_BUFFER(dev) dev->active_flow->buffer
 #define ACTIVE_RD_OFF(dev) dev->active_flow->read_offset
 #define ACTIVE_WR_OFF(dev) dev->active_flow->write_offset
+#define ACTIVE_AV_SPC(dev) dev->active_flow->available_space
+
+
+struct work_queue_task {
+    int major;
+    int minor;
+    struct device_state *dev;
+    const char __user *buff;
+    size_t len;
+    struct work_struct the_work;
+};
+
 
 /* Prototypes of driver operations */
-static int mfdf_open(struct inode *, struct file *);
-static int mfdf_release(struct inode *, struct file *);
 static ssize_t mfdf_write(struct file *, const char __user *, size_t, loff_t *);
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(2,6,35))
    static long mfdf_ioctl(struct file *, unsigned int, unsigned long);
@@ -69,54 +81,89 @@ static ssize_t mfdf_write(struct file *, const char __user *, size_t, loff_t *);
     static long mfdf_ioctl(struct file *, unsigned int, unsigned long);
 #endif
 static int init_devices(void);
+void write_on_buffer(unsigned long);
+static void __do_write_on_buffer_unlocked(struct device_state *, const char __user *, size_t);
 
 
-static int mfdf_open(struct inode *inode, struct file *file)
+void write_on_buffer(unsigned long data)
 {
-    printk("%s Thread %d has called an open on %s device [MAJOR: %d, minor: %d]", MODNAME, current->pid, DEVICE_NAME ,get_major(file), get_minor(file));
-    return 0;
+    struct work_queue_task *the_task = (struct work_queue_task *)container_of((void*)data,struct work_queue_task,the_work);
+    printk("%s kworker %d handle a write operation on the low priority flow of %s device [MAJOR: %d, minor: %d]", MODNAME, current->pid, DEVICE_NAME, the_task->major, the_task->minor);
+    mutex_lock(&(the_task->dev->synchronizer));
+    __do_write_on_buffer_unlocked(the_task->dev, the_task->buff, the_task->len);
+    mutex_unlock(&(the_task->dev->synchronizer));
+    kfree(the_task);
+
+    module_put(THIS_MODULE);
 }
 
-
-static int mfdf_release(struct inode *inode, struct file *file)
+static void __do_write_on_buffer_unlocked(struct device_state *dev, const char __user *buff, size_t len)
 {
-    printk("%s Thread %d has called a release on %s device [MAJOR: %d, minor: %d]", MODNAME, current->pid, DEVICE_NAME ,get_major(file), get_minor(file));
-    return 0;
-}
-
-
-static ssize_t mfdf_write(struct file * filp, const char __user * buff, size_t len, loff_t *off)
-{
-    int minor, residual;
+    int residual;
     size_t to_end_length, from_start_length;
+
+    to_end_length = MIN(len, BUFSIZE - ACTIVE_WR_OFF(dev));
+    residual = copy_from_user(ACTIVE_BUFFER(dev) + ACTIVE_WR_OFF(dev), buff, to_end_length);
+    ACTIVE_WR_OFF(dev) += (to_end_length - residual);
+    if (unlikely(residual) != 0) {
+        mutex_unlock(&(dev->synchronizer));
+        return;
+    }
+
+    from_start_length = MIN((len - to_end_length), ACTIVE_RD_OFF(dev));
+    if (from_start_length > 0) {
+        residual = copy_from_user(ACTIVE_BUFFER(dev), buff + to_end_length, from_start_length);
+        ACTIVE_WR_OFF(dev) = (from_start_length - residual);
+        if (unlikely(residual) != 0) {
+            mutex_unlock(&(dev->synchronizer));
+            return;
+        }
+    }
+}
+
+
+static ssize_t mfdf_write(struct file * filp, const char __user *buff, size_t len, loff_t *off)
+{
+    int minor, retval;
     struct device_state *the_device;
-    printk("%s Thread %d has called a write on %s device [MAJOR: %d, minor: %d]", MODNAME, current->pid, DEVICE_NAME ,get_major(filp), get_minor(filp));
+    struct work_queue_task *the_task;
+    printk("%s Thread %d has called a write on %s device [MAJOR: %d, minor: %d]", MODNAME, current->pid, DEVICE_NAME, get_major(filp), get_minor(filp));
 
     minor = get_minor(filp);
     the_device = devs + minor;
 
     mutex_lock(&(the_device->synchronizer));
-    to_end_length = MIN(len, BUFSIZE - ACTIVE_WR_OFF(the_device));
-    residual = copy_from_user(ACTIVE_BUFFER(the_device) + ACTIVE_WR_OFF(the_device), buff, to_end_length);
-    ACTIVE_WR_OFF(the_device) += (to_end_length - residual);
-    if (unlikely(residual) != 0) {
-        mutex_unlock(&(the_device->synchronizer));
-        return (len - residual);
+
+    ACTIVE_AV_SPC(the_device) = (ACTIVE_AV_SPC(the_device) >= len) ? ACTIVE_AV_SPC(the_device) - len : 0;
+    retval = (ACTIVE_AV_SPC(the_device) >= len) ? len : ACTIVE_AV_SPC(the_device);
+
+    if(the_device->active_flow == &(the_device->flows[HIGH_PRIO])) {
+        __do_write_on_buffer_unlocked(the_device, buff, len);
+        goto out;
     }
 
-    from_start_length = MIN((len - to_end_length), ACTIVE_RD_OFF(the_device));
-    if (from_start_length > 0) {
-        residual = copy_from_user(ACTIVE_BUFFER(the_device), buff + to_end_length, from_start_length);
-        ACTIVE_WR_OFF(the_device) = (from_start_length - residual);
-        if (unlikely(residual) != 0) {
-            mutex_unlock(&(the_device->synchronizer));
-            return (len-residual);
-        }
-
+    if(!try_module_get(THIS_MODULE)) {
+        retval = -ENODEV;
+        goto out;
     }
+
+    the_task = (struct work_queue_task *)kzalloc(sizeof(struct work_queue_task), GFP_KERNEL);
+    if(unlikely(the_task == NULL)) {
+        retval = -ENOMEM;
+        goto out;
+    }
+    the_task->dev = the_device;
+    the_task->buff = buff;
+    the_task->len = len;
+    the_task->major = get_major(filp);
+    the_task->minor = minor;
+
+    __INIT_WORK(&(the_task->the_work),(void*)write_on_buffer,(unsigned long)(&(the_task->the_work)));
+    schedule_work(&the_task->the_work);
+
+out:
     mutex_unlock(&(the_device->synchronizer));
-
-    return to_end_length + from_start_length;
+    return retval;
 }
 
 
@@ -195,8 +242,6 @@ static ssize_t mfdf_read(struct file *filp, char *buff, size_t len, loff_t *off)
 /* Driver for multi-flow-device-file */
 static struct file_operations fops = {
     .owner          = THIS_MODULE,
-    .open           = mfdf_open,
-    .release        = mfdf_release,
     .write          = mfdf_write,
     .read           = mfdf_read,
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(2,6,35))
@@ -227,6 +272,9 @@ static int init_devices(void) {
             free_page((unsigned long)devs[i].flows[LOW_PRIO].buffer);
             break;
         }
+
+        devs[i].flows[HIGH_PRIO].available_space = BUFSIZE;
+        devs[i].flows[LOW_PRIO].available_space = BUFSIZE;
 
         // default flow is low priority
         devs[i].active_flow = &(devs[i].flows[LOW_PRIO]);
