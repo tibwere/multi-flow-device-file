@@ -244,7 +244,7 @@ static int init_devices(void) {
 }
 
 
-int init_module(void)
+int mfdf_initialize(void)
 {
     if(init_devices() == -1)
         return -ENOMEM;
@@ -260,7 +260,7 @@ int init_module(void)
 }
 
 
-void cleanup_module(void)
+void mfdf_cleanup(void)
 {
     int i;
     for(i=0; i<MINORS;++i) {
@@ -271,3 +271,6 @@ void cleanup_module(void)
     unregister_chrdev(major, DEVICE_NAME);
     printk(KERN_INFO "Multi flow device file unregistered (MAJOR number: %d)\n", major);
 }
+
+module_init(mfdf_initialize);
+module_exit(mfdf_cleanup);
