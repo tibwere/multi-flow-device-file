@@ -55,6 +55,7 @@ struct device_state {
     struct mutex synchronizer;
     struct data_flow flows[2];
     struct data_flow *active_flow;
+    struct workqueue_struct *queue;
 } devs[MINORS];
 
 #define ACTIVE_BUFFER(dev) dev->active_flow->buffer
@@ -67,7 +68,7 @@ struct work_queue_task {
     int major;
     int minor;
     struct device_state *dev;
-    const char __user *buff;
+    char buff[BUFSIZE];
     size_t len;
     struct work_struct the_work;
 };
@@ -82,7 +83,7 @@ static ssize_t mfdf_write(struct file *, const char __user *, size_t, loff_t *);
 #endif
 static int init_devices(void);
 void write_on_buffer(unsigned long);
-static void __do_write_on_buffer_unlocked(struct device_state *, const char __user *, size_t);
+static void __do_write_on_buffer_unlocked(struct device_state *, char *, size_t);
 
 
 void write_on_buffer(unsigned long data)
@@ -97,27 +98,18 @@ void write_on_buffer(unsigned long data)
     module_put(THIS_MODULE);
 }
 
-static void __do_write_on_buffer_unlocked(struct device_state *dev, const char __user *buff, size_t len)
+static void __do_write_on_buffer_unlocked(struct device_state *dev, char *buff, size_t len)
 {
-    int residual;
     size_t to_end_length, from_start_length;
 
     to_end_length = MIN(len, BUFSIZE - ACTIVE_WR_OFF(dev));
-    residual = copy_from_user(ACTIVE_BUFFER(dev) + ACTIVE_WR_OFF(dev), buff, to_end_length);
-    ACTIVE_WR_OFF(dev) += (to_end_length - residual);
-    if (unlikely(residual) != 0) {
-        mutex_unlock(&(dev->synchronizer));
-        return;
-    }
+    memcpy(ACTIVE_BUFFER(dev) + ACTIVE_WR_OFF(dev), buff, to_end_length);
+    ACTIVE_WR_OFF(dev) += to_end_length;
 
     from_start_length = MIN((len - to_end_length), ACTIVE_RD_OFF(dev));
     if (from_start_length > 0) {
-        residual = copy_from_user(ACTIVE_BUFFER(dev), buff + to_end_length, from_start_length);
-        ACTIVE_WR_OFF(dev) = (from_start_length - residual);
-        if (unlikely(residual) != 0) {
-            mutex_unlock(&(dev->synchronizer));
-            return;
-        }
+        memcpy(ACTIVE_BUFFER(dev), buff + to_end_length, from_start_length);
+        ACTIVE_WR_OFF(dev) = from_start_length;
     }
 }
 
@@ -127,6 +119,8 @@ static ssize_t mfdf_write(struct file * filp, const char __user *buff, size_t le
     int minor, retval;
     struct device_state *the_device;
     struct work_queue_task *the_task;
+    char *tmp_buffer;
+
     printk("%s Thread %d has called a write on %s device [MAJOR: %d, minor: %d]", MODNAME, current->pid, DEVICE_NAME, get_major(filp), get_minor(filp));
 
     minor = get_minor(filp);
@@ -138,7 +132,18 @@ static ssize_t mfdf_write(struct file * filp, const char __user *buff, size_t le
     retval = (ACTIVE_AV_SPC(the_device) >= len) ? len : ACTIVE_AV_SPC(the_device);
 
     if(the_device->active_flow == &(the_device->flows[HIGH_PRIO])) {
-        __do_write_on_buffer_unlocked(the_device, buff, len);
+        if((tmp_buffer = (char *)kmalloc(BUFSIZE, GFP_KERNEL)) == NULL) {
+            retval = -ENOMEM;
+            goto out;
+        }
+
+        if(copy_from_user(tmp_buffer, buff, len) != 0) {
+            retval = -ENOMEM;
+            goto out;
+        }
+
+        __do_write_on_buffer_unlocked(the_device, tmp_buffer, len);
+        kfree(tmp_buffer);
         goto out;
     }
 
@@ -153,13 +158,17 @@ static ssize_t mfdf_write(struct file * filp, const char __user *buff, size_t le
         goto out;
     }
     the_task->dev = the_device;
-    the_task->buff = buff;
+    if (copy_from_user(the_task->buff, buff, len) != 0) {
+        kfree(the_task);
+        retval = -ENOMEM;
+        goto out;
+    }
     the_task->len = len;
     the_task->major = get_major(filp);
     the_task->minor = minor;
 
     __INIT_WORK(&(the_task->the_work),(void*)write_on_buffer,(unsigned long)(&(the_task->the_work)));
-    schedule_work(&the_task->the_work);
+    queue_work(the_task->dev->queue, &the_task->the_work);
 
 out:
     mutex_unlock(&(the_device->synchronizer));
@@ -257,6 +266,7 @@ static struct file_operations fops = {
  */
 static int init_devices(void) {
     int i;
+    char wq_name[64];
 
     memset(devs, 0x0, MINORS * sizeof(struct device_state));
 
@@ -278,6 +288,20 @@ static int init_devices(void) {
 
         // default flow is low priority
         devs[i].active_flow = &(devs[i].flows[LOW_PRIO]);
+
+        memset(wq_name, 0x0, 64);
+        snprintf(wq_name, 64, "mfdf-wq-%d", i);
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 36))
+        devs[i].queue = alloc_ordered_workqueue(wq_name, 0);
+#else
+        devs[i].queue = create_singlethread_workqueue(wq_name, WQ_MEM_RECLAIM);
+#endif
+        if(unlikely(devs[i].queue == NULL)) {
+            free_page((unsigned long)devs[i].flows[LOW_PRIO].buffer);
+            free_page((unsigned long)devs[i].flows[HIGH_PRIO].buffer);
+            break;
+        }
     }
 
     if (likely(i == MINORS))
@@ -286,6 +310,7 @@ static int init_devices(void) {
     for(i-=1; i>=0; --i) {
         free_page((unsigned long)devs[i].flows[LOW_PRIO].buffer);
         free_page((unsigned long)devs[i].flows[HIGH_PRIO].buffer);
+        destroy_workqueue(devs[i].queue);
     }
 
     return -1;
@@ -314,6 +339,7 @@ void mfdf_cleanup(void)
     for(i=0; i<MINORS;++i) {
         free_page((unsigned long)devs[i].flows[LOW_PRIO].buffer);
         free_page((unsigned long)devs[i].flows[HIGH_PRIO].buffer);
+        destroy_workqueue(devs[i].queue);
     }
 
     unregister_chrdev(major, DEVICE_NAME);
