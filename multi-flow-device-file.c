@@ -140,8 +140,8 @@ static ssize_t mfdf_write(struct file * filp, const char __user *buff, size_t le
 
     mutex_lock(&(the_device->synchronizer));
 
-    active_flow->available_space = (active_flow->available_space >= len) ? active_flow->available_space - len : 0;
     retval = MIN(active_flow->available_space, len);
+    active_flow->available_space = (active_flow->available_space >= len) ? active_flow->available_space - len : 0;
 
     if(active_flow == &(the_device->flows[HIGH_PRIO])) {
         if((tmp_buffer = (char *)kzalloc(BUFSIZE, GFP_KERNEL)) == NULL) {
