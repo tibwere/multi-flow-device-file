@@ -129,10 +129,10 @@ static ssize_t mfdf_write(struct file * filp, const char __user *buff, size_t le
     mutex_lock(&(the_device->synchronizer));
 
     ACTIVE_AV_SPC(the_device) = (ACTIVE_AV_SPC(the_device) >= len) ? ACTIVE_AV_SPC(the_device) - len : 0;
-    retval = (ACTIVE_AV_SPC(the_device) >= len) ? len : ACTIVE_AV_SPC(the_device);
+    retval = MIN(ACTIVE_AV_SPC(the_device), len);
 
     if(the_device->active_flow == &(the_device->flows[HIGH_PRIO])) {
-        if((tmp_buffer = (char *)kmalloc(BUFSIZE, GFP_KERNEL)) == NULL) {
+        if((tmp_buffer = (char *)kzalloc(BUFSIZE, GFP_KERNEL)) == NULL) {
             retval = -ENOMEM;
             goto out;
         }
