@@ -18,6 +18,7 @@ MODULE_DESCRIPTION("Multi flow device file");
 
 
 #define MIN(a,b) (((a)<(b))?(a):(b))
+
 #define MODNAME "[SOA-PROJECT]"     // Module name, useful for debug printk
 #define DEVICE_NAME "multi-flow"    // Device name, useful for debug printk
 #define MINORS (128)                // Number of minors available
@@ -54,20 +55,14 @@ struct data_flow {
 struct device_state {
     struct mutex synchronizer;
     struct data_flow flows[2];
-    struct data_flow *active_flow;
     struct workqueue_struct *queue;
 } devs[MINORS];
 
-#define ACTIVE_BUFFER(dev) dev->active_flow->buffer
-#define ACTIVE_RD_OFF(dev) dev->active_flow->read_offset
-#define ACTIVE_WR_OFF(dev) dev->active_flow->write_offset
-#define ACTIVE_AV_SPC(dev) dev->active_flow->available_space
-
-
-struct work_queue_task {
+struct work_metadata {
     int major;
     int minor;
-    struct device_state *dev;
+    struct mutex *syncro;
+    struct data_flow *active_flow;
     char buff[BUFSIZE];
     size_t len;
     struct work_struct the_work;
@@ -75,6 +70,7 @@ struct work_queue_task {
 
 
 /* Prototypes of driver operations */
+static int mfdf_open(struct inode *, struct file *);
 static ssize_t mfdf_write(struct file *, const char __user *, size_t, loff_t *);
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(2,6,35))
    static long mfdf_ioctl(struct file *, unsigned int, unsigned long);
@@ -82,58 +78,72 @@ static ssize_t mfdf_write(struct file *, const char __user *, size_t, loff_t *);
     static long mfdf_ioctl(struct file *, unsigned int, unsigned long);
 #endif
 static int init_devices(void);
-void write_on_buffer(unsigned long);
-static void __do_write_on_buffer_unlocked(struct device_state *, char *, size_t);
+static void write_on_buffer(unsigned long);
+static void __do_write_on_buffer_unlocked(struct data_flow *, char *, size_t);
 
 
-void write_on_buffer(unsigned long data)
+static void write_on_buffer(unsigned long data)
 {
-    struct work_queue_task *the_task = (struct work_queue_task *)container_of((void*)data,struct work_queue_task,the_work);
+    struct work_metadata *the_task = (struct work_metadata *)container_of((void*)data,struct work_metadata,the_work);
     printk("%s kworker %d handle a write operation on the low priority flow of %s device [MAJOR: %d, minor: %d]",
            MODNAME, current->pid, DEVICE_NAME, the_task->major, the_task->minor);
-    mutex_lock(&(the_task->dev->synchronizer));
-    __do_write_on_buffer_unlocked(the_task->dev, the_task->buff, the_task->len);
-    mutex_unlock(&(the_task->dev->synchronizer));
+
+    mutex_lock(the_task->syncro);
+    __do_write_on_buffer_unlocked(the_task->active_flow, the_task->buff, the_task->len);
+    mutex_unlock(the_task->syncro);
+
     kfree(the_task);
 
     module_put(THIS_MODULE);
 }
 
-static void __do_write_on_buffer_unlocked(struct device_state *dev, char *buff, size_t len)
+static void __do_write_on_buffer_unlocked(struct data_flow *flow, char *buff, size_t len)
 {
     size_t to_end_length, from_start_length;
 
-    to_end_length = MIN(len, BUFSIZE - ACTIVE_WR_OFF(dev));
-    memcpy(ACTIVE_BUFFER(dev) + ACTIVE_WR_OFF(dev), buff, to_end_length);
-    ACTIVE_WR_OFF(dev) += to_end_length;
+    to_end_length = MIN(len, BUFSIZE - flow->write_offset);
+    memcpy(flow->buffer + flow->write_offset, buff, to_end_length);
+    flow->write_offset += to_end_length;
 
-    from_start_length = MIN((len - to_end_length), ACTIVE_RD_OFF(dev));
+    from_start_length = MIN((len - to_end_length), flow->read_offset);
     if (from_start_length > 0) {
-        memcpy(ACTIVE_BUFFER(dev), buff + to_end_length, from_start_length);
-        ACTIVE_WR_OFF(dev) = from_start_length;
+        memcpy(flow->buffer, buff + to_end_length, from_start_length);
+        flow->write_offset = from_start_length;
     }
 }
 
+static int mfdf_open(struct inode *inode, struct file *filp)
+{
+    struct device_state *the_device;
+    printk("%s Thread %d has called an open on %s device [MAJOR: %d, minor: %d]",
+           MODNAME, current->pid, DEVICE_NAME, get_major(filp), get_minor(filp));
+
+    the_device = devs + get_minor(filp);
+    // Default active flow is the low priority one
+    filp->private_data = &(the_device->flows[LOW_PRIO]);
+    return 0;
+}
 
 static ssize_t mfdf_write(struct file * filp, const char __user *buff, size_t len, loff_t *off)
 {
-    int minor, retval;
+    int retval;
     struct device_state *the_device;
-    struct work_queue_task *the_task;
+    struct data_flow *active_flow;
+    struct work_metadata *the_task;
     char *tmp_buffer;
 
     printk("%s Thread %d has called a write on %s device [MAJOR: %d, minor: %d]",
            MODNAME, current->pid, DEVICE_NAME, get_major(filp), get_minor(filp));
 
-    minor = get_minor(filp);
-    the_device = devs + minor;
+    the_device = devs + get_minor(filp);
+    active_flow = ((struct data_flow *)filp->private_data);
 
     mutex_lock(&(the_device->synchronizer));
 
-    ACTIVE_AV_SPC(the_device) = (ACTIVE_AV_SPC(the_device) >= len) ? ACTIVE_AV_SPC(the_device) - len : 0;
-    retval = MIN(ACTIVE_AV_SPC(the_device), len);
+    active_flow->available_space = (active_flow->available_space >= len) ? active_flow->available_space - len : 0;
+    retval = MIN(active_flow->available_space, len);
 
-    if(the_device->active_flow == &(the_device->flows[HIGH_PRIO])) {
+    if(active_flow == &(the_device->flows[HIGH_PRIO])) {
         if((tmp_buffer = (char *)kzalloc(BUFSIZE, GFP_KERNEL)) == NULL) {
             retval = -ENOMEM;
             goto out;
@@ -144,7 +154,7 @@ static ssize_t mfdf_write(struct file * filp, const char __user *buff, size_t le
             goto out;
         }
 
-        __do_write_on_buffer_unlocked(the_device, tmp_buffer, len);
+        __do_write_on_buffer_unlocked(active_flow, tmp_buffer, len);
         kfree(tmp_buffer);
         goto out;
     }
@@ -154,23 +164,24 @@ static ssize_t mfdf_write(struct file * filp, const char __user *buff, size_t le
         goto out;
     }
 
-    the_task = (struct work_queue_task *)kzalloc(sizeof(struct work_queue_task), GFP_KERNEL);
+    the_task = (struct work_metadata *)kzalloc(sizeof(struct work_metadata), GFP_KERNEL);
     if(unlikely(the_task == NULL)) {
         retval = -ENOMEM;
         goto out;
     }
-    the_task->dev = the_device;
+    the_task->major = get_major(filp);
+    the_task->minor = get_minor(filp);
+    the_task->syncro = &(the_device->synchronizer);
+    the_task->active_flow = active_flow;
     if (copy_from_user(the_task->buff, buff, len) != 0) {
         kfree(the_task);
         retval = -ENOMEM;
         goto out;
     }
     the_task->len = len;
-    the_task->major = get_major(filp);
-    the_task->minor = minor;
 
     __INIT_WORK(&(the_task->the_work),(void*)write_on_buffer,(unsigned long)(&(the_task->the_work)));
-    queue_work(the_task->dev->queue, &the_task->the_work);
+    queue_work(the_device->queue, &the_task->the_work);
 
 out:
     mutex_unlock(&(the_device->synchronizer));
@@ -180,36 +191,37 @@ out:
 
 static ssize_t mfdf_read(struct file *filp, char *buff, size_t len, loff_t *off)
 {
-    int minor, residual;
+    int residual;
     size_t to_end_length, from_start_length;
     struct device_state *the_device;
+    struct data_flow *active_flow;
 
     printk("%s Thread %d has called a read on %s device [MAJOR: %d, minor: %d]",
            MODNAME, current->pid, DEVICE_NAME ,get_major(filp), get_minor(filp));
 
-    minor = get_minor(filp);
-    the_device = devs + minor;
+    the_device = devs + get_minor(filp);
+    active_flow = ((struct data_flow *)filp->private_data);
 
     mutex_lock(&(the_device->synchronizer));
 
-    if(ACTIVE_WR_OFF(the_device) >= ACTIVE_RD_OFF(the_device)) {
-        to_end_length = MIN(len, (ACTIVE_WR_OFF(the_device) - ACTIVE_RD_OFF(the_device)));
+    if(active_flow->write_offset >= active_flow->read_offset) {
+        to_end_length = MIN(len, (active_flow->write_offset - active_flow->read_offset));
         from_start_length = 0;
     } else {
-        to_end_length = MIN(len, (BUFSIZE - ACTIVE_RD_OFF(the_device)));
-        from_start_length = MIN(len - to_end_length, ACTIVE_WR_OFF(the_device));
+        to_end_length = MIN(len, (BUFSIZE - active_flow->read_offset));
+        from_start_length = MIN((len - to_end_length), active_flow->write_offset);
     }
 
-    residual = copy_to_user(buff, ACTIVE_BUFFER(the_device) + ACTIVE_RD_OFF(the_device), to_end_length);
-    ACTIVE_RD_OFF(the_device) += (to_end_length-residual);
+    residual = copy_to_user(buff, active_flow->buffer + active_flow->read_offset, to_end_length);
+    active_flow->read_offset += (to_end_length-residual);
     if (unlikely(residual) != 0) {
         mutex_unlock(&(the_device->synchronizer));
         return (len-residual);
     }
 
     if (from_start_length > 0) {
-        residual = copy_to_user(buff + to_end_length, ACTIVE_BUFFER(the_device), from_start_length);
-        ACTIVE_RD_OFF(the_device) = (from_start_length-residual);
+        residual = copy_to_user(buff + to_end_length, active_flow->buffer, from_start_length);
+        active_flow->read_offset = (from_start_length-residual);
         if (unlikely(residual) != 0) {
             mutex_unlock(&(the_device->synchronizer));
             return (len-residual);
@@ -228,22 +240,17 @@ static ssize_t mfdf_read(struct file *filp, char *buff, size_t len, loff_t *off)
     static long mfdf_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 #endif
 {
-    struct device_state *the_device;
-    int minor;
-
-    minor = get_minor(filp);
-    the_device = devs + minor;
+    struct device_state *the_device = devs + get_minor(filp);
 
     switch (cmd) {
         case SET_PRIO_CMD:
             if (arg != HIGH_PRIO && arg != LOW_PRIO)
                 return -EINVAL;
 
-            mutex_lock(&(the_device->synchronizer));
             printk("%s Thread %d used an ioctl on %s device [MAJOR: %d, minor: %d] to change priority to %s",
                    MODNAME, current->pid, DEVICE_NAME ,get_major(filp), get_minor(filp), (arg == HIGH_PRIO) ? "HIGH" : "LOW");
-            the_device->active_flow = &(the_device->flows[arg]);
-            mutex_unlock(&(the_device->synchronizer));
+
+            cmpxchg(&(filp->private_data), &(the_device->flows[(arg == HIGH_PRIO) ? LOW_PRIO : HIGH_PRIO]), &(the_device->flows[arg]));
             return 0;
         default:
             return -EINVAL;
@@ -254,6 +261,7 @@ static ssize_t mfdf_read(struct file *filp, char *buff, size_t len, loff_t *off)
 /* Driver for multi-flow-device-file */
 static struct file_operations fops = {
     .owner          = THIS_MODULE,
+    .open           = mfdf_open,
     .write          = mfdf_write,
     .read           = mfdf_read,
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(2,6,35))
@@ -289,11 +297,8 @@ static int init_devices(void) {
         devs[i].flows[HIGH_PRIO].available_space = BUFSIZE;
         devs[i].flows[LOW_PRIO].available_space = BUFSIZE;
 
-        // default flow is low priority
-        devs[i].active_flow = &(devs[i].flows[LOW_PRIO]);
-
         memset(wq_name, 0x0, 64);
-        snprintf(wq_name, 64, "mfdf-wq-%d", i);
+        snprintf(wq_name, 64, "mfdf-wq-%d-%d", major, i);
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 36))
         devs[i].queue = alloc_ordered_workqueue(wq_name, 0);
@@ -322,13 +327,15 @@ static int init_devices(void) {
 
 int mfdf_initialize(void)
 {
-    if(init_devices() == -1)
-        return -ENOMEM;
-
     major = __register_chrdev(0, 0, MINORS, DEVICE_NAME, &fops);
     if (major < 0) {
         printk("Registering multi-flow device file failed\n");
         return major;
+    }
+
+    if(init_devices() == -1) {
+        unregister_chrdev(major, DEVICE_NAME);
+        return -ENOMEM;
     }
 
     printk(KERN_INFO "Multi flow device file registered (MAJOR number: %d)\n", major);
