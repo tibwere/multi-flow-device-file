@@ -89,7 +89,8 @@ static void __do_write_on_buffer_unlocked(struct device_state *, char *, size_t)
 void write_on_buffer(unsigned long data)
 {
     struct work_queue_task *the_task = (struct work_queue_task *)container_of((void*)data,struct work_queue_task,the_work);
-    printk("%s kworker %d handle a write operation on the low priority flow of %s device [MAJOR: %d, minor: %d]", MODNAME, current->pid, DEVICE_NAME, the_task->major, the_task->minor);
+    printk("%s kworker %d handle a write operation on the low priority flow of %s device [MAJOR: %d, minor: %d]",
+           MODNAME, current->pid, DEVICE_NAME, the_task->major, the_task->minor);
     mutex_lock(&(the_task->dev->synchronizer));
     __do_write_on_buffer_unlocked(the_task->dev, the_task->buff, the_task->len);
     mutex_unlock(&(the_task->dev->synchronizer));
@@ -121,7 +122,8 @@ static ssize_t mfdf_write(struct file * filp, const char __user *buff, size_t le
     struct work_queue_task *the_task;
     char *tmp_buffer;
 
-    printk("%s Thread %d has called a write on %s device [MAJOR: %d, minor: %d]", MODNAME, current->pid, DEVICE_NAME, get_major(filp), get_minor(filp));
+    printk("%s Thread %d has called a write on %s device [MAJOR: %d, minor: %d]",
+           MODNAME, current->pid, DEVICE_NAME, get_major(filp), get_minor(filp));
 
     minor = get_minor(filp);
     the_device = devs + minor;
@@ -182,7 +184,8 @@ static ssize_t mfdf_read(struct file *filp, char *buff, size_t len, loff_t *off)
     size_t to_end_length, from_start_length;
     struct device_state *the_device;
 
-    printk("%s Thread %d has called a read on %s device [MAJOR: %d, minor: %d]", MODNAME, current->pid, DEVICE_NAME ,get_major(filp), get_minor(filp));
+    printk("%s Thread %d has called a read on %s device [MAJOR: %d, minor: %d]",
+           MODNAME, current->pid, DEVICE_NAME ,get_major(filp), get_minor(filp));
 
     minor = get_minor(filp);
     the_device = devs + minor;
