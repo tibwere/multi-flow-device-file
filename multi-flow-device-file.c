@@ -295,7 +295,7 @@ static int init_devices(void) {
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 36))
         devs[i].queue = alloc_ordered_workqueue(wq_name, 0);
 #else
-        devs[i].queue = create_singlethread_workqueue(wq_name, WQ_MEM_RECLAIM);
+        devs[i].queue = create_singlethread_workqueue(wq_name);
 #endif
         if(unlikely(devs[i].queue == NULL)) {
             free_page((unsigned long)devs[i].flows[LOW_PRIO].buffer);
