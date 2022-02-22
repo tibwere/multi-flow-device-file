@@ -1,18 +1,33 @@
 obj-m += multi-flow-device-file.o
 
+CC=gcc
+IDIR=./user/include
+CFLAGS=-I$(IDIR) -Wall -Wextra -fPIC
+LIBSRC=./user/lib/mfdf.c
+LIBDST=./user/lib/mfdf.o
+LOCALSO=./user/lib/libmfdf.so
+LOCALHDR=./user/include/mfdf.h
+HDRDIR=/usr/local/include
+LIBDIR=/usr/local/lib
+REMOTESO=$(LIBDIR)/libmfdf.so
+REMOTEHDR=$(HDRDIR)/mfdf.h
+MODNAME=multi-flow-device-file
+
 build:
 	make -C /lib/modules/$(shell uname -r)/build M=$(shell pwd) modules
-	gcc -c ./user/lib/mfdf.c -o ./user/lib/mfdf.o -I./user/include -Wall -Wextra
-	ar rcs ./user/lib/libmfdf.a ./user/lib/mfdf.o
+	$(CC) -c $(CFLAGS) $(LIBSRC) -o $(LIBDST)
+	$(CC) -shared -o $(LOCALSO) $(LIBDST)
 
 install:
-	insmod multi-flow-device-file.ko
-	install -m 644 ./user/include/mfdf.h /usr/local/include
-	install -m 644 ./user/lib/libmfdf.a /usr/local/lib
+	insmod $(MODNAME).ko
+	install -m 755 $(LOCALHDR) $(HDRDIR)
+	install -m 755 $(LOCALSO) $(LIBDIR)
+	ldconfig
 
 .PHONY: clean
 
 clean:
 	make -C /lib/modules/$(shell uname -r)/build M=$(shell pwd) clean
-	rm ./user/lib/libmfdf.a ./user/lib/mfdf.o
-	rm /usr/local/lib/libmfdf.a /usr/local/include/mfdf.h
+	$(RM) $(LIBDST) $(LOCALSO) $(REMOTESO) $(REMOTEHDR)
+	rmmod $(MODNAME)
+	ldconfig
