@@ -2,7 +2,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include "mfdf.h"
+#include <mfdf.h>
 
 int main()
 {

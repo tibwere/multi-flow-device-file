@@ -1,9 +1,10 @@
 *.cmd
 *.o
+*.a
 *.mod
 *.mod.c
 *.mod.o
 *.ko
 modules.order
 Module.symvers
-user/tester
+user/test-mfdf
