@@ -76,7 +76,8 @@ struct session_metadata {
     int timeout;
 };
 
-#define ACTIVE_FLOW(filp) ((struct session_metadata *)filp->private_data)->active_flow
+#define get_active_flow(filp) __atomic_load_n(&(((struct session_metadata *)filp->private_data)->active_flow), __ATOMIC_SEQ_CST)
+#define set_active_flow(filp, newflow) __atomic_store_n(&(((struct session_metadata *)filp->private_data)->active_flow), newflow, __ATOMIC_SEQ_CST)
 
 
 /* Prototypes of driver operations */
@@ -164,7 +165,7 @@ static ssize_t mfdf_write(struct file * filp, const char __user *buff, size_t le
            MODNAME, current->pid, DEVICE_NAME, get_major(filp), get_minor(filp));
 
     the_device = devs + get_minor(filp);
-    active_flow = ACTIVE_FLOW(filp);
+    active_flow = get_active_flow(filp);
 
     mutex_lock(&(the_device->synchronizer));
 
@@ -228,7 +229,7 @@ static ssize_t mfdf_read(struct file *filp, char *buff, size_t len, loff_t *off)
            MODNAME, current->pid, DEVICE_NAME ,get_major(filp), get_minor(filp));
 
     the_device = devs + get_minor(filp);
-    active_flow = ACTIVE_FLOW(filp);
+    active_flow = get_active_flow(filp);
 
     mutex_lock(&(the_device->synchronizer));
     active_flow->available_space = (BUFSIZE - active_flow->available_space >= len) ? active_flow->available_space + len : BUFSIZE;
@@ -279,7 +280,7 @@ static ssize_t mfdf_read(struct file *filp, char *buff, size_t len, loff_t *off)
             printk("%s Thread %d used an ioctl on %s device [MAJOR: %d, minor: %d] to change priority to %s",
                    MODNAME, current->pid, DEVICE_NAME ,get_major(filp), get_minor(filp), (arg == HIGH_PRIO) ? "HIGH" : "LOW");
 
-            __atomic_store_n(&(ACTIVE_FLOW(filp)), &(the_device->flows[arg]), __ATOMIC_SEQ_CST);
+            set_active_flow(filp, &(the_device->flows[arg]));
             return 0;
         default:
             return -EINVAL;
