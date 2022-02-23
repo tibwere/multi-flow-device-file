@@ -28,6 +28,8 @@ MODULE_DESCRIPTION("Multi flow device file");
 #define SET_PRIO_CMD (0)
 #define LOW_PRIO (0)
 #define HIGH_PRIO (1)
+#define BLOCK (0)
+#define NON_BLOCK (1)
 
 /* Macro for the retrieve of major and minor code from session */
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)
@@ -68,9 +70,18 @@ struct work_metadata {
     struct work_struct the_work;
 };
 
+struct session_metadata {
+    struct data_flow *active_flow;
+    int modality;
+    int timeout;
+};
+
+#define ACTIVE_FLOW(filp) ((struct session_metadata *)filp->private_data)->active_flow
+
 
 /* Prototypes of driver operations */
 static int mfdf_open(struct inode *, struct file *);
+static int mfdf_release(struct inode *, struct file *);
 static ssize_t mfdf_write(struct file *, const char __user *, size_t, loff_t *);
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(2,6,35))
    static long mfdf_ioctl(struct file *, unsigned int, unsigned long);
@@ -119,8 +130,25 @@ static int mfdf_open(struct inode *inode, struct file *filp)
            MODNAME, current->pid, DEVICE_NAME, get_major(filp), get_minor(filp));
 
     the_device = devs + get_minor(filp);
+
+    filp->private_data = (struct session_metadata *)kzalloc(sizeof(struct session_metadata), GFP_KERNEL);
+    if (unlikely(filp->private_data == NULL))
+        return -ENOMEM;
+
     // Default active flow is the low priority one
-    filp->private_data = &(the_device->flows[LOW_PRIO]);
+    ((struct session_metadata *)filp->private_data)->active_flow = &(the_device->flows[LOW_PRIO]);
+    ((struct session_metadata *)filp->private_data)->modality = BLOCK;
+    ((struct session_metadata *)filp->private_data)->timeout = 0;
+
+    return 0;
+}
+
+static int mfdf_release(struct inode *inode, struct file *filp)
+{
+    printk("%s Thread %d has called a release on %s device [MAJOR: %d, minor: %d]",
+           MODNAME, current->pid, DEVICE_NAME, get_major(filp), get_minor(filp));
+
+    kfree(filp->private_data);
     return 0;
 }
 
@@ -136,7 +164,7 @@ static ssize_t mfdf_write(struct file * filp, const char __user *buff, size_t le
            MODNAME, current->pid, DEVICE_NAME, get_major(filp), get_minor(filp));
 
     the_device = devs + get_minor(filp);
-    active_flow = ((struct data_flow *)filp->private_data);
+    active_flow = ACTIVE_FLOW(filp);
 
     mutex_lock(&(the_device->synchronizer));
 
@@ -200,7 +228,7 @@ static ssize_t mfdf_read(struct file *filp, char *buff, size_t len, loff_t *off)
            MODNAME, current->pid, DEVICE_NAME ,get_major(filp), get_minor(filp));
 
     the_device = devs + get_minor(filp);
-    active_flow = ((struct data_flow *)filp->private_data);
+    active_flow = ACTIVE_FLOW(filp);
 
     mutex_lock(&(the_device->synchronizer));
     active_flow->available_space = (BUFSIZE - active_flow->available_space >= len) ? active_flow->available_space + len : BUFSIZE;
@@ -251,7 +279,7 @@ static ssize_t mfdf_read(struct file *filp, char *buff, size_t len, loff_t *off)
             printk("%s Thread %d used an ioctl on %s device [MAJOR: %d, minor: %d] to change priority to %s",
                    MODNAME, current->pid, DEVICE_NAME ,get_major(filp), get_minor(filp), (arg == HIGH_PRIO) ? "HIGH" : "LOW");
 
-            __atomic_store_n(&(filp->private_data), &(the_device->flows[arg]), __ATOMIC_SEQ_CST);
+            __atomic_store_n(&(ACTIVE_FLOW(filp)), &(the_device->flows[arg]), __ATOMIC_SEQ_CST);
             return 0;
         default:
             return -EINVAL;
@@ -266,10 +294,11 @@ static struct file_operations fops = {
     .write          = mfdf_write,
     .read           = mfdf_read,
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(2,6,35))
-   .ioctl          = mfdf_ioctl
+   .ioctl           = mfdf_ioctl,
 #else
-    .unlocked_ioctl = mfdf_ioctl
+    .unlocked_ioctl = mfdf_ioctl,
 #endif
+    .release        = mfdf_release,
 };
 
 
