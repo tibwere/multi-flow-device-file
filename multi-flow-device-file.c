@@ -37,6 +37,7 @@ module_param(major, int, 0660);
 
 /* Data structures */
 struct data_flow {
+    struct mutex mu;
     char *buffer;
     int read_offset;
     int write_offset;
@@ -44,17 +45,13 @@ struct data_flow {
 };
 
 struct device_state {
-    struct mutex synchronizer;
     struct data_flow flows[2];
     struct workqueue_struct *queue;
-    atomic_t reader_ordinal;
-    atomic_t next_reader;
 } devs[MINORS];
 
 struct work_metadata {
     int major;
     int minor;
-    struct mutex *syncro;
     struct data_flow *active_flow;
     char buff[BUFSIZE];
     size_t len;
@@ -100,7 +97,7 @@ static ssize_t mfdf_write(struct file *, const char __user *, size_t, loff_t *);
 #endif
 static int init_devices(void);
 static void write_on_buffer(unsigned long);
-static void __do_write_on_buffer_unlocked(struct data_flow *, const char *, size_t);
+static void __always_inline __do_write_on_buffer_unlocked(struct data_flow *, const char *, size_t);
 static int __always_inline __deferred_write(struct file *, struct device_state *, const char __user *, size_t);
 static int __always_inline __syncronous_write(struct data_flow *, const char __user *, size_t);
 
@@ -111,16 +108,16 @@ static void write_on_buffer(unsigned long data)
     printk("%s kworker %d handle a write operation on the low priority flow of %s device [MAJOR: %d, minor: %d]",
            MODNAME, current->pid, DEVICE_NAME, the_task->major, the_task->minor);
 
-    mutex_lock(the_task->syncro);
+    mutex_lock(&(the_task->active_flow->mu));
     __do_write_on_buffer_unlocked(the_task->active_flow, the_task->buff, the_task->len);
-    mutex_unlock(the_task->syncro);
+    mutex_unlock(&(the_task->active_flow->mu));
 
     kfree(the_task);
 
     module_put(THIS_MODULE);
 }
 
-static void __do_write_on_buffer_unlocked(struct data_flow *flow, const char *buff, size_t len)
+static void __always_inline __do_write_on_buffer_unlocked(struct data_flow *flow, const char *buff, size_t len)
 {
     size_t to_end_length, from_start_length;
 
@@ -191,7 +188,6 @@ static int __always_inline __deferred_write(struct file *filp, struct device_sta
 
     the_task->major = get_major(filp);
     the_task->minor = get_minor(filp);
-    the_task->syncro = &(dev->synchronizer);
     the_task->active_flow = get_active_flow(filp);
     the_task->len = len;
     if (copy_from_user(the_task->buff, buff, len) != 0) {
@@ -217,7 +213,7 @@ static ssize_t mfdf_write(struct file * filp, const char __user *buff, size_t le
     the_device = devs + get_minor(filp);
     active_flow = get_active_flow(filp);
 
-    mutex_lock(&(the_device->synchronizer));
+    mutex_lock(&(active_flow->mu));
 
     retval = MIN(get_writable_space(active_flow), len);
     update_standing_bytes_write(active_flow, len);
@@ -230,7 +226,7 @@ static ssize_t mfdf_write(struct file * filp, const char __user *buff, size_t le
             retval = write_operation_retval;
     }
 
-    mutex_unlock(&(the_device->synchronizer));
+    mutex_unlock(&(active_flow->mu));
     return retval;
 }
 
@@ -247,7 +243,7 @@ static ssize_t mfdf_read(struct file *filp, char *buff, size_t len, loff_t *off)
     the_device = devs + get_minor(filp);
     active_flow = get_active_flow(filp);
 
-    mutex_lock(&(the_device->synchronizer));
+    mutex_lock(&(active_flow->mu));
     update_standing_bytes_read(active_flow, len);
 
     if(active_flow->write_offset >= active_flow->read_offset) {
@@ -261,7 +257,7 @@ static ssize_t mfdf_read(struct file *filp, char *buff, size_t len, loff_t *off)
     residual = copy_to_user(buff, active_flow->buffer + active_flow->read_offset, to_end_length);
     active_flow->read_offset += (to_end_length-residual);
     if (unlikely(residual) != 0) {
-        mutex_unlock(&(the_device->synchronizer));
+        mutex_unlock(&(active_flow->mu));
         return (len-residual);
     }
 
@@ -269,12 +265,12 @@ static ssize_t mfdf_read(struct file *filp, char *buff, size_t len, loff_t *off)
         residual = copy_to_user(buff + to_end_length, active_flow->buffer, from_start_length);
         active_flow->read_offset = (from_start_length-residual);
         if (unlikely(residual) != 0) {
-            mutex_unlock(&(the_device->synchronizer));
+            mutex_unlock(&(active_flow->mu));
             return (len-residual);
         }
 
     }
-    mutex_unlock(&(the_device->synchronizer));
+    mutex_unlock(&(active_flow->mu));
 
     return to_end_length + from_start_length;
 }
@@ -329,9 +325,8 @@ static int init_devices(void) {
     memset(devs, 0x0, MINORS * sizeof(struct device_state));
 
     for (i=0; i<MINORS; ++i) {
-        mutex_init(&(devs[i].synchronizer));
-        atomic_set(&(devs[i].reader_ordinal), 0);
-        atomic_set(&(devs[i].next_reader), 0);
+        mutex_init(&(devs[i].flows[LOW_PRIO].mu));
+        mutex_init(&(devs[i].flows[HIGH_PRIO].mu));
 
         devs[i].flows[LOW_PRIO].buffer = (char *)get_zeroed_page(GFP_KERNEL);
         if (unlikely(devs[i].flows[LOW_PRIO].buffer == NULL))
@@ -343,7 +338,7 @@ static int init_devices(void) {
             break;
         }
 
-        /* N.B. init fields of data_flows is not necessary due to previout memset */
+        /* N.B. other fields initialization is not necessary due to previout memset */
 
         memset(wq_name, 0x0, 64);
         snprintf(wq_name, 64, "mfdf-wq-%d-%d", major, i);
