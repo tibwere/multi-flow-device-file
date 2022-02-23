@@ -18,6 +18,7 @@ MODULE_DESCRIPTION("Multi flow device file");
 
 
 #define MIN(a,b) (((a)<(b))?(a):(b))
+#define MAX(a,b) (((a)>(b))?(a):(b))
 
 #define MODNAME "[SOA-PROJECT]"     // Module name, useful for debug printk
 #define DEVICE_NAME "multi-flow"    // Device name, useful for debug printk
@@ -51,13 +52,19 @@ struct data_flow {
     char *buffer;
     int read_offset;
     int write_offset;
-    int available_space;
+    int standing_bytes;
 };
+
+#define get_writable_space(flow) (BUFSIZE - flow->standing_bytes)
+#define update_standing_bytes_write(flow, len) flow->standing_bytes = MIN(flow->standing_bytes + len, BUFSIZE)
+#define update_standing_bytes_read(flow, len) flow->standing_bytes = MAX(flow->standing_bytes - len, 0)
 
 struct device_state {
     struct mutex synchronizer;
     struct data_flow flows[2];
     struct workqueue_struct *queue;
+    atomic_t reader_ordinal;
+    atomic_t next_reader;
 } devs[MINORS];
 
 struct work_metadata {
@@ -78,6 +85,7 @@ struct session_metadata {
 
 #define get_active_flow(filp) __atomic_load_n(&(((struct session_metadata *)filp->private_data)->active_flow), __ATOMIC_SEQ_CST)
 #define set_active_flow(filp, newflow) __atomic_store_n(&(((struct session_metadata *)filp->private_data)->active_flow), newflow, __ATOMIC_SEQ_CST)
+#define is_high_active(filp, dev) (get_active_flow(filp) == &(dev->flows[HIGH_PRIO]))
 
 
 /* Prototypes of driver operations */
@@ -91,7 +99,9 @@ static ssize_t mfdf_write(struct file *, const char __user *, size_t, loff_t *);
 #endif
 static int init_devices(void);
 static void write_on_buffer(unsigned long);
-static void __do_write_on_buffer_unlocked(struct data_flow *, char *, size_t);
+static void __do_write_on_buffer_unlocked(struct data_flow *, const char *, size_t);
+static int __always_inline __deferred_write(struct file *, struct device_state *, const char __user *, size_t);
+static int __always_inline __syncronous_write(struct data_flow *, const char __user *, size_t);
 
 
 static void write_on_buffer(unsigned long data)
@@ -109,7 +119,7 @@ static void write_on_buffer(unsigned long data)
     module_put(THIS_MODULE);
 }
 
-static void __do_write_on_buffer_unlocked(struct data_flow *flow, char *buff, size_t len)
+static void __do_write_on_buffer_unlocked(struct data_flow *flow, const char *buff, size_t len)
 {
     size_t to_end_length, from_start_length;
 
@@ -153,13 +163,52 @@ static int mfdf_release(struct inode *inode, struct file *filp)
     return 0;
 }
 
+static int __always_inline __syncronous_write(struct data_flow *flow, const char __user *user_buffer, size_t len)
+{
+    char *kernel_buffer;
+    if((kernel_buffer = (char *)kzalloc(BUFSIZE, GFP_KERNEL)) == NULL)
+        return -ENOMEM;
+
+    if(copy_from_user(kernel_buffer, user_buffer, len) != 0)
+        return -ENOMEM;
+
+    __do_write_on_buffer_unlocked(flow, kernel_buffer, len);
+    kfree(kernel_buffer);
+    return 0;
+}
+
+static int __always_inline __deferred_write(struct file *filp, struct device_state *dev, const char __user *buff, size_t len)
+{
+    struct work_metadata *the_task;
+
+    if(!try_module_get(THIS_MODULE))
+        return -ENODEV;
+
+    the_task = (struct work_metadata *)kzalloc(sizeof(struct work_metadata), GFP_KERNEL);
+    if(unlikely(the_task == NULL))
+        return -ENOMEM;
+
+    the_task->major = get_major(filp);
+    the_task->minor = get_minor(filp);
+    the_task->syncro = &(dev->synchronizer);
+    the_task->active_flow = get_active_flow(filp);
+    the_task->len = len;
+    if (copy_from_user(the_task->buff, buff, len) != 0) {
+        kfree(the_task);
+        return -ENOMEM;
+    }
+
+    __INIT_WORK(&(the_task->the_work),(void*)write_on_buffer,(unsigned long)(&(the_task->the_work)));
+    queue_work(dev->queue, &the_task->the_work);
+
+    return 0;
+}
+
 static ssize_t mfdf_write(struct file * filp, const char __user *buff, size_t len, loff_t *off)
 {
-    int retval;
+    int write_operation_retval, retval;
     struct device_state *the_device;
     struct data_flow *active_flow;
-    struct work_metadata *the_task;
-    char *tmp_buffer;
 
     printk("%s Thread %d has called a write on %s device [MAJOR: %d, minor: %d]",
            MODNAME, current->pid, DEVICE_NAME, get_major(filp), get_minor(filp));
@@ -169,54 +218,20 @@ static ssize_t mfdf_write(struct file * filp, const char __user *buff, size_t le
 
     mutex_lock(&(the_device->synchronizer));
 
-    retval = MIN(active_flow->available_space, len);
-    active_flow->available_space = (active_flow->available_space >= len) ? active_flow->available_space - len : 0;
+    retval = MIN(get_writable_space(active_flow), len);
+    update_standing_bytes_write(active_flow, len);
 
-    if(active_flow == &(the_device->flows[HIGH_PRIO])) {
-        if((tmp_buffer = (char *)kzalloc(BUFSIZE, GFP_KERNEL)) == NULL) {
-            retval = -ENOMEM;
-            goto out;
-        }
-
-        if(copy_from_user(tmp_buffer, buff, len) != 0) {
-            retval = -ENOMEM;
-            goto out;
-        }
-
-        __do_write_on_buffer_unlocked(active_flow, tmp_buffer, len);
-        kfree(tmp_buffer);
-        goto out;
+    if(is_high_active(filp, the_device)) {
+        if((write_operation_retval = __syncronous_write(active_flow, buff, len)) != 0)
+            retval = write_operation_retval;
+    } else {
+        if((write_operation_retval = __deferred_write(filp, the_device, buff, len)) != 0)
+            retval = write_operation_retval;
     }
 
-    if(!try_module_get(THIS_MODULE)) {
-        retval = -ENODEV;
-        goto out;
-    }
-
-    the_task = (struct work_metadata *)kzalloc(sizeof(struct work_metadata), GFP_KERNEL);
-    if(unlikely(the_task == NULL)) {
-        retval = -ENOMEM;
-        goto out;
-    }
-    the_task->major = get_major(filp);
-    the_task->minor = get_minor(filp);
-    the_task->syncro = &(the_device->synchronizer);
-    the_task->active_flow = active_flow;
-    if (copy_from_user(the_task->buff, buff, len) != 0) {
-        kfree(the_task);
-        retval = -ENOMEM;
-        goto out;
-    }
-    the_task->len = len;
-
-    __INIT_WORK(&(the_task->the_work),(void*)write_on_buffer,(unsigned long)(&(the_task->the_work)));
-    queue_work(the_device->queue, &the_task->the_work);
-
-out:
     mutex_unlock(&(the_device->synchronizer));
     return retval;
 }
-
 
 static ssize_t mfdf_read(struct file *filp, char *buff, size_t len, loff_t *off)
 {
@@ -232,7 +247,7 @@ static ssize_t mfdf_read(struct file *filp, char *buff, size_t len, loff_t *off)
     active_flow = get_active_flow(filp);
 
     mutex_lock(&(the_device->synchronizer));
-    active_flow->available_space = (BUFSIZE - active_flow->available_space >= len) ? active_flow->available_space + len : BUFSIZE;
+    update_standing_bytes_read(active_flow, len);
 
     if(active_flow->write_offset >= active_flow->read_offset) {
         to_end_length = MIN(len, (active_flow->write_offset - active_flow->read_offset));
@@ -314,6 +329,8 @@ static int init_devices(void) {
 
     for (i=0; i<MINORS; ++i) {
         mutex_init(&(devs[i].synchronizer));
+        atomic_set(&(devs[i].reader_ordinal), 0);
+        atomic_set(&(devs[i].next_reader), 0);
 
         devs[i].flows[LOW_PRIO].buffer = (char *)get_zeroed_page(GFP_KERNEL);
         if (unlikely(devs[i].flows[LOW_PRIO].buffer == NULL))
@@ -325,8 +342,7 @@ static int init_devices(void) {
             break;
         }
 
-        devs[i].flows[HIGH_PRIO].available_space = BUFSIZE;
-        devs[i].flows[LOW_PRIO].available_space = BUFSIZE;
+        /* N.B. init fields of data_flows is not necessary due to previout memset */
 
         memset(wq_name, 0x0, 64);
         snprintf(wq_name, 64, "mfdf-wq-%d-%d", major, i);
