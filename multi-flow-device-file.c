@@ -203,6 +203,7 @@ static ssize_t mfdf_read(struct file *filp, char *buff, size_t len, loff_t *off)
     active_flow = ((struct data_flow *)filp->private_data);
 
     mutex_lock(&(the_device->synchronizer));
+    active_flow->available_space = (BUFSIZE - active_flow->available_space >= len) ? active_flow->available_space + len : BUFSIZE;
 
     if(active_flow->write_offset >= active_flow->read_offset) {
         to_end_length = MIN(len, (active_flow->write_offset - active_flow->read_offset));
@@ -250,7 +251,7 @@ static ssize_t mfdf_read(struct file *filp, char *buff, size_t len, loff_t *off)
             printk("%s Thread %d used an ioctl on %s device [MAJOR: %d, minor: %d] to change priority to %s",
                    MODNAME, current->pid, DEVICE_NAME ,get_major(filp), get_minor(filp), (arg == HIGH_PRIO) ? "HIGH" : "LOW");
 
-            cmpxchg(&(filp->private_data), &(the_device->flows[(arg == HIGH_PRIO) ? LOW_PRIO : HIGH_PRIO]), &(the_device->flows[arg]));
+            __atomic_store_n(&(filp->private_data), &(the_device->flows[arg]), __ATOMIC_SEQ_CST);
             return 0;
         default:
             return -EINVAL;
