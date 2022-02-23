@@ -1,33 +1,33 @@
 obj-m += multi-flow-device-file.o
 
-CC=gcc
-IDIR=./user/include
-CFLAGS=-I$(IDIR) -Wall -Wextra -fPIC
-LIBSRC=./user/lib/mfdf.c
-LIBDST=./user/lib/mfdf.o
-LOCALSO=./user/lib/libmfdf.so
-LOCALHDR=./user/include/mfdf.h
-HDRDIR=/usr/local/include
-LIBDIR=/usr/local/lib
-REMOTESO=$(LIBDIR)/libmfdf.so
-REMOTEHDR=$(HDRDIR)/mfdf.h
-MODNAME=multi-flow-device-file
+CC            = gcc
+IDIR          = ./user/include
+CFLAGS        = -I$(IDIR) -Wall -Wextra -fPIC
+LOCAL_LIB_DIR = ./user/lib
+GLOBAL_PREFIX = /usr/local
+LOCAL_SRC     = $(LOCAL_LIB_DIR)/mfdf.c
+LOCAL_OBJ     = $(LOCAL_LIB_DIR)/mfdf.o
+LOCAL_SO      = $(LOCAL_LIB_DIR)/libmfdf.so
+LOCAL_HEADER  = ./user/include/mfdf.h
+GLOBAL_SO     = $(GLOBAL_PREFIX)/lib/libmfdf.so
+GLOBAL_HEADER = $(GLOBAL_PREFIX)/include/mfdf.h
+MODNAME       = multi-flow-device-file
 
 build:
 	make -C /lib/modules/$(shell uname -r)/build M=$(shell pwd) modules
-	$(CC) -c $(CFLAGS) $(LIBSRC) -o $(LIBDST)
-	$(CC) -shared -o $(LOCALSO) $(LIBDST)
+	$(CC) -c $(CFLAGS) $(LOCAL_SRC) -o $(LOCAL_OBJ)
+	$(CC) -shared -o $(LOCAL_SO) $(LOCAL_OBJ)
 
 install:
 	insmod $(MODNAME).ko
-	install -m 755 $(LOCALHDR) $(HDRDIR)
-	install -m 755 $(LOCALSO) $(LIBDIR)
-	ldconfig
+	install -m 755 $(LOCAL_HEADER) $(GLOBAL_HEADER)
+	install -m 755 $(LOCAL_SO) $(GLOBAL_SO)
+	ldconfig $(GLOBAL_PREFIX)/lib
 
 .PHONY: clean
 
 clean:
 	make -C /lib/modules/$(shell uname -r)/build M=$(shell pwd) clean
-	$(RM) $(LIBDST) $(LOCALSO) $(REMOTESO) $(REMOTEHDR)
+	$(RM) $(LOCAL_OBJ) $(LOCAL_SO) $(GLOBAL_SO) $(GLOBAL_HEADER)
 	rmmod $(MODNAME)
 	ldconfig
