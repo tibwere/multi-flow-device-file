@@ -1,6 +1,7 @@
 *.cmd
 *.o
 *.a
+*.so
 *.mod
 *.mod.c
 *.mod.o
