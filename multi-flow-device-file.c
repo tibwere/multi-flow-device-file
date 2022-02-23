@@ -17,47 +17,31 @@ MODULE_AUTHOR("Simone Tiberi <simone.tiberi.98@gmail.com>");
 MODULE_DESCRIPTION("Multi flow device file");
 
 
-#define MIN(a,b) (((a)<(b))?(a):(b))
-#define MAX(a,b) (((a)>(b))?(a):(b))
-
+/* "Constants" macros */
 #define MODNAME "[SOA-PROJECT]"     // Module name, useful for debug printk
 #define DEVICE_NAME "multi-flow"    // Device name, useful for debug printk
 #define MINORS (128)                // Number of minors available
 #define BUFSIZE (PAGE_SIZE)         // Size of buffer
 
-// IOCTL stuff
 #define SET_PRIO_CMD (0)
 #define LOW_PRIO (0)
 #define HIGH_PRIO (1)
 #define BLOCK (0)
 #define NON_BLOCK (1)
 
-/* Macro for the retrieve of major and minor code from session */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)
-    #define get_major(session)      MAJOR(session->f_inode->i_rdev)
-    #define get_minor(session)      MINOR(session->f_inode->i_rdev)
-#else
-    #define get_major(session)      MAJOR(session->f_dentry->d_inode->i_rdev)
-    #define get_minor(session)      MINOR(session->f_dentry->d_inode->i_rdev)
-#endif
 
-
-/* Major number for the driver obtained from the subsystem */
+/* Global variables/module parameters */
 int major;
 module_param(major, int, 0660);
 
 
-/* Basic metadata for representing the device */
+/* Data structures */
 struct data_flow {
     char *buffer;
     int read_offset;
     int write_offset;
     int standing_bytes;
 };
-
-#define get_writable_space(flow) (BUFSIZE - flow->standing_bytes)
-#define update_standing_bytes_write(flow, len) flow->standing_bytes = MIN(flow->standing_bytes + len, BUFSIZE)
-#define update_standing_bytes_read(flow, len) flow->standing_bytes = MAX(flow->standing_bytes - len, 0)
 
 struct device_state {
     struct mutex synchronizer;
@@ -83,12 +67,29 @@ struct session_metadata {
     int timeout;
 };
 
+
+/* "Code" macros */
+#define MIN(a,b) (((a)<(b))?(a):(b))
+#define MAX(a,b) (((a)>(b))?(a):(b))
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)
+    #define get_major(session)      MAJOR(session->f_inode->i_rdev)
+    #define get_minor(session)      MINOR(session->f_inode->i_rdev)
+#else
+    #define get_major(session)      MAJOR(session->f_dentry->d_inode->i_rdev)
+    #define get_minor(session)      MINOR(session->f_dentry->d_inode->i_rdev)
+#endif
+
+#define get_writable_space(flow) (BUFSIZE - flow->standing_bytes)
+#define update_standing_bytes_write(flow, len) flow->standing_bytes = MIN(flow->standing_bytes + len, BUFSIZE)
+#define update_standing_bytes_read(flow, len) flow->standing_bytes = MAX(flow->standing_bytes - len, 0)
+
 #define get_active_flow(filp) __atomic_load_n(&(((struct session_metadata *)filp->private_data)->active_flow), __ATOMIC_SEQ_CST)
 #define set_active_flow(filp, newflow) __atomic_store_n(&(((struct session_metadata *)filp->private_data)->active_flow), newflow, __ATOMIC_SEQ_CST)
 #define is_high_active(filp, dev) (get_active_flow(filp) == &(dev->flows[HIGH_PRIO]))
 
 
-/* Prototypes of driver operations */
+/* Prototypes */
 static int mfdf_open(struct inode *, struct file *);
 static int mfdf_release(struct inode *, struct file *);
 static ssize_t mfdf_write(struct file *, const char __user *, size_t, loff_t *);
