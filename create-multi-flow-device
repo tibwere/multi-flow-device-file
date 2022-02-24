@@ -29,6 +29,7 @@ while getopts ":m:n:" opt; do
 done
 
 [ -z ${MFDF_NAME} ] && usage && exit 3
+[ -e "/dev/${MFDF_NAME}" ] && echo "Device already exists, retry" && exit 4
 
 /usr/bin/mknod /dev/${MFDF_NAME} c ${MAJORNUMBER} ${MINORNUMBER}
-echo "Device /dev/${MFDF_NAME} successfully created!" 
+echo "Device /dev/${MFDF_NAME} successfully created!"
