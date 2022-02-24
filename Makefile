@@ -24,10 +24,13 @@ install:
 	install -m 755 $(LOCAL_SO) $(GLOBAL_SO)
 	ldconfig $(GLOBAL_PREFIX)/lib
 
-.PHONY: clean
+.PHONY: clean clean-all
 
 clean:
 	make -C /lib/modules/$(shell uname -r)/build M=$(shell pwd) clean
-	$(RM) $(LOCAL_OBJ) $(LOCAL_SO) $(GLOBAL_SO) $(GLOBAL_HEADER)
+	$(RM) $(LOCAL_OBJ) $(LOCAL_SO)
+
+clean-all: clean
+	$(RM) $(GLOBAL_SO) $(GLOBAL_HEADER)
 	rmmod $(MODNAME)
 	ldconfig
