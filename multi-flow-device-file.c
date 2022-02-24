@@ -42,6 +42,8 @@ struct data_flow {
     int read_offset;
     int write_offset;
     int standing_bytes;
+    atomic_t reader_ordinal;
+    atomic_t next_reader;
 };
 
 struct device_state {
@@ -85,6 +87,17 @@ struct session_metadata {
 #define set_active_flow(filp, newflow) __atomic_store_n(&(((struct session_metadata *)filp->private_data)->active_flow), newflow, __ATOMIC_SEQ_CST)
 #define is_high_active(filp, dev) (get_active_flow(filp) == &(dev->flows[HIGH_PRIO]))
 
+#define evaluate_lengths(flow, total_len, to_end_len, from_start_len) \
+    do { \
+        if(flow->write_offset >= flow->read_offset) { \
+            to_end_len = MIN(len, (flow->write_offset - flow->read_offset)); \
+            from_start_len = 0; \
+        } else { \
+            to_end_len = MIN(len, (BUFSIZE - flow->read_offset)); \
+            from_start_len = MIN((len - to_end_len), flow->write_offset); \
+        } \
+    } while(0)
+
 
 /* Prototypes */
 static int mfdf_open(struct inode *, struct file *);
@@ -100,6 +113,7 @@ static void write_on_buffer(unsigned long);
 static void __always_inline __do_write_on_buffer_unlocked(struct data_flow *, const char *, size_t);
 static int __always_inline __deferred_write(struct file *, struct device_state *, const char __user *, size_t);
 static int __always_inline __syncronous_write(struct data_flow *, const char __user *, size_t);
+static int __do_effective_read(struct data_flow *, char __user *, size_t, int *);
 
 
 static void write_on_buffer(unsigned long data)
@@ -230,12 +244,37 @@ static ssize_t mfdf_write(struct file * filp, const char __user *buff, size_t le
     return retval;
 }
 
-static ssize_t mfdf_read(struct file *filp, char *buff, size_t len, loff_t *off)
+static int __do_effective_read(struct data_flow *flow, char __user *buff, size_t len, int *total)
 {
-    int residual;
-    size_t to_end_length, from_start_length;
+    int residual, from_start_len, to_end_len;
+
+    evaluate_lengths(flow, len, to_end_len, from_start_len);
+
+    residual = copy_to_user(buff, flow->buffer + flow->read_offset, to_end_len);
+    flow->read_offset += (to_end_len - residual);
+    if (unlikely(residual) != 0) {
+        *total = (len - residual);
+        return -1;
+    }
+
+    if (from_start_len > 0) {
+        residual = copy_to_user(buff + to_end_len, flow->buffer, from_start_len);
+        flow->read_offset = (from_start_len - residual);
+        if (unlikely(residual) != 0) {
+            *total = (len - residual);
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+static ssize_t mfdf_read(struct file *filp, char __user *buff, size_t len, loff_t *off)
+{
+    int read_bytes, retval, me;
     struct device_state *the_device;
     struct data_flow *active_flow;
+    DECLARE_WAIT_QUEUE_HEAD(the_wait_queue);
 
     printk("%s Thread %d has called a read on %s device [MAJOR: %d, minor: %d]",
            MODNAME, current->pid, DEVICE_NAME ,get_major(filp), get_minor(filp));
@@ -243,38 +282,19 @@ static ssize_t mfdf_read(struct file *filp, char *buff, size_t len, loff_t *off)
     the_device = devs + get_minor(filp);
     active_flow = get_active_flow(filp);
 
+    me = atomic_fetch_add(1, &(active_flow->reader_ordinal));
+    wait_event(the_wait_queue, (me == atomic_read(&(active_flow->next_reader))));
+
     mutex_lock(&(active_flow->mu));
+    retval = MIN(active_flow->standing_bytes, len);
     update_standing_bytes_read(active_flow, len);
 
-    if(active_flow->write_offset >= active_flow->read_offset) {
-        to_end_length = MIN(len, (active_flow->write_offset - active_flow->read_offset));
-        from_start_length = 0;
-    } else {
-        to_end_length = MIN(len, (BUFSIZE - active_flow->read_offset));
-        from_start_length = MIN((len - to_end_length), active_flow->write_offset);
-    }
+    if(__do_effective_read(active_flow, buff, len, &read_bytes) != 0)
+        retval = read_bytes;
 
-    residual = copy_to_user(buff, active_flow->buffer + active_flow->read_offset, to_end_length);
-    active_flow->read_offset += (to_end_length-residual);
-    if (unlikely(residual) != 0) {
-        mutex_unlock(&(active_flow->mu));
-        return (len-residual);
-    }
-
-    if (from_start_length > 0) {
-        residual = copy_to_user(buff + to_end_length, active_flow->buffer, from_start_length);
-        active_flow->read_offset = (from_start_length-residual);
-        if (unlikely(residual) != 0) {
-            mutex_unlock(&(active_flow->mu));
-            return (len-residual);
-        }
-
-    }
     mutex_unlock(&(active_flow->mu));
-
-    return to_end_length + from_start_length;
+    return retval;
 }
-
 
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(2,6,35))
    static int mfdf_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned long arg)
@@ -304,6 +324,7 @@ static ssize_t mfdf_read(struct file *filp, char *buff, size_t len, loff_t *off)
 static struct file_operations fops = {
     .owner          = THIS_MODULE,
     .open           = mfdf_open,
+    .release        = mfdf_release,
     .write          = mfdf_write,
     .read           = mfdf_read,
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(2,6,35))
@@ -311,7 +332,6 @@ static struct file_operations fops = {
 #else
     .unlocked_ioctl = mfdf_ioctl,
 #endif
-    .release        = mfdf_release,
 };
 
 
