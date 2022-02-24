@@ -29,6 +29,9 @@ MODULE_DESCRIPTION("Multi flow device file");
 #define BLOCK (0)
 #define NON_BLOCK (1)
 
+#define ROFF (0)
+#define WOFF (1)
+
 
 /* Global variables/module parameters */
 int major;
@@ -39,8 +42,7 @@ module_param(major, int, 0660);
 struct data_flow {
     struct mutex mu;
     char *buffer;
-    int read_offset;
-    int write_offset;
+    int off[2];
     int standing_bytes;
     atomic_t reader_ordinal;
     atomic_t next_reader;
@@ -61,9 +63,8 @@ struct work_metadata {
 };
 
 struct session_metadata {
-    struct data_flow *active_flow;
-    int modality;
-    int timeout;
+    atomic_t idx;
+    volatile unsigned long modality : 2;
 };
 
 
@@ -83,18 +84,21 @@ struct session_metadata {
 #define update_standing_bytes_write(flow, len) flow->standing_bytes = MIN(flow->standing_bytes + len, BUFSIZE)
 #define update_standing_bytes_read(flow, len) flow->standing_bytes = MAX(flow->standing_bytes - len, 0)
 
-#define get_active_flow(filp) __atomic_load_n(&(((struct session_metadata *)filp->private_data)->active_flow), __ATOMIC_SEQ_CST)
-#define set_active_flow(filp, newflow) __atomic_store_n(&(((struct session_metadata *)filp->private_data)->active_flow), newflow, __ATOMIC_SEQ_CST)
-#define is_high_active(filp, dev) (get_active_flow(filp) == &(dev->flows[HIGH_PRIO]))
+#define __session_metadata_addr(filp, field) &(((struct session_metadata *)filp->private_data)->field)
+#define get_active_flow(filp) &(devs[get_minor(filp)].flows[atomic_read(__session_metadata_addr(filp, idx))])
+#define set_active_flow(filp, new) atomic_set(__session_metadata_addr(filp, idx), new)
+#define is_high_active(filp) (atomic_read(__session_metadata_addr(filp, idx)) == HIGH_PRIO)
+
+#define init_modality(filp) ((struct session_metadata *)filp->private_data)->modality = 0x0
 
 #define evaluate_lengths(flow, total_len, to_end_len, from_start_len) \
     do { \
-        if(flow->write_offset >= flow->read_offset) { \
-            to_end_len = MIN(len, (flow->write_offset - flow->read_offset)); \
+        if(flow->off[WOFF] >= flow->off[ROFF]) { \
+            to_end_len = MIN(len, (flow->off[WOFF] - flow->off[ROFF])); \
             from_start_len = 0; \
         } else { \
-            to_end_len = MIN(len, (BUFSIZE - flow->read_offset)); \
-            from_start_len = MIN((len - to_end_len), flow->write_offset); \
+            to_end_len = MIN(len, (BUFSIZE - flow->off[ROFF])); \
+            from_start_len = MIN((len - to_end_len), flow->off[WOFF]); \
         } \
     } while(0)
 
@@ -135,14 +139,14 @@ static void __always_inline __do_write_on_buffer_unlocked(struct data_flow *flow
 {
     size_t to_end_length, from_start_length;
 
-    to_end_length = MIN(len, BUFSIZE - flow->write_offset);
-    memcpy(flow->buffer + flow->write_offset, buff, to_end_length);
-    flow->write_offset += to_end_length;
+    to_end_length = MIN(len, BUFSIZE - flow->off[WOFF]);
+    memcpy(flow->buffer + flow->off[WOFF], buff, to_end_length);
+    flow->off[WOFF] += to_end_length;
 
-    from_start_length = MIN((len - to_end_length), flow->read_offset);
+    from_start_length = MIN((len - to_end_length), flow->off[ROFF]);
     if (from_start_length > 0) {
         memcpy(flow->buffer, buff + to_end_length, from_start_length);
-        flow->write_offset = from_start_length;
+        flow->off[WOFF] = from_start_length;
     }
 }
 
@@ -159,9 +163,8 @@ static int mfdf_open(struct inode *inode, struct file *filp)
         return -ENOMEM;
 
     // Default active flow is the low priority one
-    ((struct session_metadata *)filp->private_data)->active_flow = &(the_device->flows[LOW_PRIO]);
-    ((struct session_metadata *)filp->private_data)->modality = BLOCK;
-    ((struct session_metadata *)filp->private_data)->timeout = 0;
+    set_active_flow(filp, LOW_PRIO);
+    init_modality(filp);
 
     return 0;
 }
@@ -232,7 +235,7 @@ static ssize_t mfdf_write(struct file * filp, const char __user *buff, size_t le
     retval = MIN(get_writable_space(active_flow), len);
     update_standing_bytes_write(active_flow, len);
 
-    if(is_high_active(filp, the_device)) {
+    if(is_high_active(filp)) {
         if((write_operation_retval = __syncronous_write(active_flow, buff, len)) != 0)
             retval = write_operation_retval;
     } else {
@@ -250,8 +253,8 @@ static int __do_effective_read(struct data_flow *flow, char __user *buff, size_t
 
     evaluate_lengths(flow, len, to_end_len, from_start_len);
 
-    residual = copy_to_user(buff, flow->buffer + flow->read_offset, to_end_len);
-    flow->read_offset += (to_end_len - residual);
+    residual = copy_to_user(buff, flow->buffer + flow->off[ROFF], to_end_len);
+    flow->off[ROFF] += (to_end_len - residual);
     if (unlikely(residual) != 0) {
         *total = (len - residual);
         return -1;
@@ -259,7 +262,7 @@ static int __do_effective_read(struct data_flow *flow, char __user *buff, size_t
 
     if (from_start_len > 0) {
         residual = copy_to_user(buff + to_end_len, flow->buffer, from_start_len);
-        flow->read_offset = (from_start_len - residual);
+        flow->off[ROFF] = (from_start_len - residual);
         if (unlikely(residual) != 0) {
             *total = (len - residual);
             return -1;
@@ -302,8 +305,6 @@ static ssize_t mfdf_read(struct file *filp, char __user *buff, size_t len, loff_
     static long mfdf_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 #endif
 {
-    struct device_state *the_device = devs + get_minor(filp);
-
     switch (cmd) {
         case SET_PRIO_CMD:
             if (arg != HIGH_PRIO && arg != LOW_PRIO)
@@ -312,7 +313,7 @@ static ssize_t mfdf_read(struct file *filp, char __user *buff, size_t len, loff_
             printk("%s Thread %d used an ioctl on %s device [MAJOR: %d, minor: %d] to change priority to %s",
                    MODNAME, current->pid, DEVICE_NAME ,get_major(filp), get_minor(filp), (arg == HIGH_PRIO) ? "HIGH" : "LOW");
 
-            set_active_flow(filp, &(the_device->flows[arg]));
+            set_active_flow(filp, arg);
             return 0;
         default:
             return -EINVAL;
