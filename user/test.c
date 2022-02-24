@@ -14,14 +14,17 @@ int main()
         exit(1);
     }
 
-    printf("Write return value: %ld\n", mfdf_printf_low(fd, "Hello everyone I'm %s and I'm writing on file descriptor %d", "Simone", fd));
-    printf("Write return value: %ld\n", mfdf_printf_high(fd, "This is a very important message"));
+    mfdf_set_read_modality(fd,BLOCK);
+    printf("Read return value: %ld\n", mfdf_prio_gets(fd, LOW_PRIO, buff, 10));
 
-    memset(buff, 0x0, 4096);
-    printf("Read return value: %ld\n", mfdf_prio_gets(fd, LOW_PRIO, buff, 4096));
-    printf("This is what I read: \"%s\"\n", buff);
-
-    memset(buff, 0x0, 4096);
-    printf("Read return value: %ld\n", mfdf_prio_gets(fd, HIGH_PRIO, buff, 4096));
+    // printf("Write return value: %ld\n", mfdf_printf_low(fd, "Hello everyone I'm %s and I'm writing on file descriptor %d", "Simone", fd));
+    // printf("Write return value: %ld\n", mfdf_printf_high(fd, "This is a very important message"));
+    //
+    // memset(buff, 0x0, 4096);
+    // printf("Read return value: %ld\n", mfdf_prio_gets(fd, LOW_PRIO, buff, 4096));
+    // printf("This is what I read: \"%s\"\n", buff);
+    //
+    // memset(buff, 0x0, 4096);
+    // printf("Read return value: %ld\n", mfdf_prio_gets(fd, HIGH_PRIO, buff, 4096));
     printf("This is what I read: \"%s\"\n", buff);
 }
