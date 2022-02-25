@@ -1,22 +1,23 @@
-CC     = gcc
-IDIR   = include/
-CFLAGS = -I$(IDIR) -Wall -Wextra -fPIC
-PREFIX = /usr/local
+IDIR = ./include
+CC = gcc
+CFLAGS = -I$(IDIR) -Wall -Wextra
+OBJDIR = ./obj
+BINDIR = ./bin
+SRCDIR = ./src
+DEPS   = ./include/user.h
+OBJS   = ./obj/user.o ./obj/test.o
+BIN    = mfdf-test-cases
 
-build:
-	$(CC) -c $(CFLAGS) lib/user.c -o lib/user.o
-	$(CC) -shared -o lib/libuser.so lib/user.o
+$(OBJDIR)/%.o: $(SRCDIR)/%.c $(DEPS) make-directories
+	$(CC) -c -o $@ $< $(CFLAGS)
 
-install:
-	mkdir -p $(PREFIX)/lib/mfdf
-	install -m 755 include/user.h $(PREFIX)/include/mfdf/user.h
-	install -m 755 lib/libuser.so $(PREFIX)/lib/mfdf/libuser.so
-	ldconfig $(PREFIX)/lib
+test-cases: $(OBJS)
+	$(CC) -o $(BINDIR)/$(BIN) $^ $(CFLAGS)
 
-.PHONY: clean
+.PHONY: clean make-directories
+
+make-directories:
+	mkdir -p $(OBJDIR) $(BINDIR)
 
 clean:
-	$(RM) lib/user.o lib/libuser.so
-
-clean-all: clean
-	$(RM) $(PREFIX)/include/mfdf/user.h $(PREFIX)/lib/mfdf/libuser.so
+	$(RM) -r $(OBJDIR)/ $(BINDIR)/
