@@ -24,11 +24,6 @@ MODULE_DESCRIPTION("Multi flow device file");
 #define DEVICE_NAME "multi-flow"    // Device name, useful for debug printk
 #define MINORS (128)                // Number of minors available
 #define BUFSIZE (PAGE_SIZE)         // Size of buffer
-#define RD_BIT (0x1)
-#define WR_BIT (0x2)
-
-#define ROFF (0)
-#define WOFF (1)
 
 
 /* Global variables/module parameters */
@@ -44,6 +39,8 @@ struct data_flow {
     int off[2];
     int pending_bytes;
 };
+#define ROFF (0)
+#define WOFF (1)
 
 struct device_state {
     struct data_flow flows[2];
@@ -64,6 +61,8 @@ struct session_metadata {
     volatile unsigned char READ_MODALITY : 1;
     volatile unsigned char WRITE_MODALITY : 1;
 };
+#define RD_BIT (0x1)
+#define WR_BIT (0x2)
 
 
 /* "Code" macros */
@@ -268,7 +267,12 @@ static ssize_t mfdf_write(struct file * filp, const char __user *buff, size_t le
     the_device = devs + get_minor(filp);
     active_flow = get_active_flow(filp);
 
-    mutex_lock(&(active_flow->mu));
+    if (is_block_read) {
+        mutex_lock(&(active_flow->mu));
+    } else {
+        if (!mutex_trylock(&(active_flow->mu)))
+            return -EBUSY;
+    }
 
 retry:
     if((available_bytes_for_write(active_flow) < len) && is_block_write(filp)) {
@@ -341,7 +345,12 @@ static ssize_t mfdf_read(struct file *filp, char __user *buff, size_t len, loff_
     the_device = devs + get_minor(filp);
     active_flow = get_active_flow(filp);
 
-    mutex_lock(&(active_flow->mu));
+    if (is_block_read) {
+        mutex_lock(&(active_flow->mu));
+    } else {
+        if (!mutex_trylock(&(active_flow->mu)))
+            return -EBUSY;
+    }
 
 retry:
     if((available_bytes_for_read(active_flow) < len) && is_block_read(filp)) {
