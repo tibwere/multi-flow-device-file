@@ -10,6 +10,8 @@
 #include <linux/string.h>
 #include <linux/slab.h>
 
+#include "include/ioctl.h"
+
 
 /* Module informations */
 MODULE_LICENSE("GPL");
@@ -24,14 +26,6 @@ MODULE_DESCRIPTION("Multi flow device file");
 #define BUFSIZE (PAGE_SIZE)         // Size of buffer
 #define RD_BIT (0x1)
 #define WR_BIT (0x2)
-
-#define SET_PRIO_CMD (0)
-#define SET_READ_MODALITY_CMD (1)
-#define SET_WRITE_MODALITY_CMD (2)
-#define LOW_PRIO (0)
-#define HIGH_PRIO (1)
-#define NON_BLOCK (0)
-#define BLOCK (1)
 
 #define ROFF (0)
 #define WOFF (1)
@@ -48,7 +42,7 @@ struct data_flow {
     struct wait_queue_head pending_requests;
     char *buffer;
     int off[2];
-    int standing_bytes;
+    int pending_bytes;
 };
 
 struct device_state {
@@ -62,6 +56,7 @@ struct work_metadata {
     struct data_flow *active_flow;
     char buff[BUFSIZE];
     size_t len;
+    int block;
     struct work_struct the_work;
 };
 
@@ -84,16 +79,14 @@ struct session_metadata {
     #define get_minor(session)      MINOR(session->f_dentry->d_inode->i_rdev)
 #endif
 
-#define get_writable_space(flow) (BUFSIZE - flow->standing_bytes)
-#define update_standing_bytes_after_write(flow, len) flow->standing_bytes = MIN(flow->standing_bytes + len, BUFSIZE)
-#define update_standing_bytes_after_read(flow, len) flow->standing_bytes = MAX(((int)(flow->standing_bytes - len)), 0)
-
 #define __session_metadata_addr(filp, field) &(((struct session_metadata *)filp->private_data)->field)
 #define get_active_flow(filp) &(devs[get_minor(filp)].flows[atomic_read(__session_metadata_addr(filp, idx))])
 #define set_active_flow(filp, new) atomic_set(__session_metadata_addr(filp, idx), new)
 #define is_high_active(filp) (atomic_read(__session_metadata_addr(filp, idx)) == HIGH_PRIO)
 #define is_block_read(filp) (((struct session_metadata *)filp->private_data)->READ_MODALITY == BLOCK)
+#define is_block_write(filp) (((struct session_metadata *)filp->private_data)->WRITE_MODALITY == BLOCK)
 #define set_read_modality(filp, new) ((struct session_metadata *)filp->private_data)->READ_MODALITY = new
+#define set_write_modality(filp, new) ((struct session_metadata *)filp->private_data)->WRITE_MODALITY = new
 
 #define init_modality(filp) \
     do { \
@@ -119,22 +112,42 @@ static ssize_t mfdf_write(struct file *, const char __user *, size_t, loff_t *);
 #endif
 static int init_devices(void);
 static void write_on_buffer(unsigned long);
-static void  __do_write_on_buffer_unlocked(struct data_flow *, const char *, size_t);
+static void  __do_effective_write(struct data_flow *, const char *, size_t, int, int, int);
 static int  __deferred_write(struct file *, struct device_state *, const char __user *, size_t);
 static int  __do_effective_read(struct data_flow *, char __user *, size_t, int *);
-static int __always_inline check_if_bytes_are_available(struct data_flow *, size_t);
-static int __always_inline __syncronous_write(struct data_flow *, const char __user *, size_t);
+static int __always_inline __available_bytes(struct data_flow *, int);
+static int __always_inline __check_if_bytes_are_available(struct data_flow *, size_t, int);
+static int __always_inline __syncronous_write(struct data_flow *, struct file *, const char __user *, size_t);
 
 
-static int __always_inline check_if_bytes_are_available(struct data_flow *flow, size_t len)
+
+static int __always_inline __available_bytes(struct data_flow *flow, int type)
+{
+    int available_for_read;
+
+    if (flow->off[WOFF] >= flow->off[ROFF])
+        available_for_read = flow->off[WOFF] - flow->off[ROFF];
+    else
+        available_for_read =  (BUFSIZE - flow->off[ROFF]) + flow->off[WOFF];
+
+    return (type == 0) ? available_for_read : BUFSIZE - available_for_read;
+}
+
+#define available_bytes_for_read(flow) __available_bytes(flow, 0)
+#define available_bytes_for_write(flow) __available_bytes(flow, 1)
+
+static int __always_inline __check_if_bytes_are_available(struct data_flow *flow, size_t len, int type)
 {
     int ret;
     mutex_lock(&(flow->mu));
-    ret = (flow->standing_bytes >= len);
+    ret = (__available_bytes(flow, type) >= len);
     mutex_unlock(&(flow->mu));
 
     return ret;
 }
+
+#define check_if_bytes_are_available_for_read(flow, len) __check_if_bytes_are_available(flow, len, 0)
+#define check_if_bytes_are_available_for_write(flow, len) __check_if_bytes_are_available(flow, len, 1)
 
 static void write_on_buffer(unsigned long data)
 {
@@ -143,7 +156,7 @@ static void write_on_buffer(unsigned long data)
            MODNAME, current->pid, DEVICE_NAME, the_task->major, the_task->minor);
 
     mutex_lock(&(the_task->active_flow->mu));
-    __do_write_on_buffer_unlocked(the_task->active_flow, the_task->buff, the_task->len);
+    __do_effective_write(the_task->active_flow, the_task->buff, the_task->len, the_task->major, the_task->minor, the_task->block);
     mutex_unlock(&(the_task->active_flow->mu));
 
     wake_up_interruptible(&(the_task->active_flow->pending_requests));
@@ -153,9 +166,23 @@ static void write_on_buffer(unsigned long data)
     module_put(THIS_MODULE);
 }
 
-static void  __do_write_on_buffer_unlocked(struct data_flow *flow, const char *buff, size_t len)
+static void  __do_effective_write(struct data_flow *flow, const char *buff, size_t len, int maj, int min, int block)
 {
     size_t to_end_length, from_start_length;
+
+    printk("Quanto vale block: %d", block);
+
+retry:
+    if((available_bytes_for_write(flow) < len) && block) {
+        mutex_unlock(&(flow->mu));
+        printk("%s Thread %d waits until %ld bytes are ready to be written to %s device [MAJOR: %d, minor: %d]",
+               MODNAME, current->pid, len, DEVICE_NAME , maj, min);
+
+        wait_event_interruptible(flow->pending_requests, check_if_bytes_are_available_for_write(flow, len));
+
+        mutex_lock(&(flow->mu));
+        if (available_bytes_for_write(flow) < len) goto retry;
+    }
 
     if(flow->off[WOFF] >= flow->off[ROFF]) {
         to_end_length = MIN(len, (BUFSIZE - flow->off[WOFF]));
@@ -172,6 +199,8 @@ static void  __do_write_on_buffer_unlocked(struct data_flow *flow, const char *b
         memcpy(flow->buffer, buff + to_end_length, from_start_length);
         flow->off[WOFF] = from_start_length;
     }
+
+    flow->pending_bytes -= (from_start_length + to_end_length);
 }
 
 static int mfdf_open(struct inode *inode, struct file *filp)
@@ -202,7 +231,7 @@ static int mfdf_release(struct inode *inode, struct file *filp)
     return 0;
 }
 
-static int __always_inline __syncronous_write(struct data_flow *flow, const char __user *user_buffer, size_t len)
+static int __always_inline __syncronous_write(struct data_flow *flow, struct file *filp, const char __user *user_buffer, size_t len)
 {
     char *kernel_buffer;
     if((kernel_buffer = (char *)kzalloc(BUFSIZE, GFP_KERNEL)) == NULL)
@@ -211,7 +240,7 @@ static int __always_inline __syncronous_write(struct data_flow *flow, const char
     if(copy_from_user(kernel_buffer, user_buffer, len) != 0)
         return -ENOMEM;
 
-    __do_write_on_buffer_unlocked(flow, kernel_buffer, len);
+    __do_effective_write(flow, kernel_buffer, len, get_major(filp), get_minor(filp), is_block_write(filp));
     kfree(kernel_buffer);
     return 0;
 }
@@ -231,6 +260,7 @@ static int  __deferred_write(struct file *filp, struct device_state *dev, const 
     the_task->minor = get_minor(filp);
     the_task->active_flow = get_active_flow(filp);
     the_task->len = len;
+    the_task->block = is_block_write(filp);
     if (copy_from_user(the_task->buff, buff, len) != 0) {
         kfree(the_task);
         return -ENOMEM;
@@ -256,11 +286,10 @@ static ssize_t mfdf_write(struct file * filp, const char __user *buff, size_t le
 
     mutex_lock(&(active_flow->mu));
 
-    retval = MIN(get_writable_space(active_flow), len);
-    update_standing_bytes_after_write(active_flow, len);
+    retval = MIN(available_bytes_for_write(active_flow) - active_flow->pending_bytes, len);
 
     if(is_high_active(filp)) {
-        if((write_operation_retval = __syncronous_write(active_flow, buff, len)) != 0)
+        if((write_operation_retval = __syncronous_write(active_flow, filp, buff, len)) != 0)
             retval = write_operation_retval;
     } else {
         if((write_operation_retval = __deferred_write(filp, the_device, buff, len)) != 0)
@@ -319,19 +348,18 @@ static ssize_t mfdf_read(struct file *filp, char __user *buff, size_t len, loff_
     mutex_lock(&(active_flow->mu));
 
 retry:
-    if((active_flow->standing_bytes < len) && is_block_read(filp)) {
+    if((available_bytes_for_read(active_flow) < len) && is_block_read(filp)) {
         mutex_unlock(&(active_flow->mu));
         printk("%s Thread %d waits until %ld bytes are ready to be read from %s device [MAJOR: %d, minor: %d]",
                MODNAME, current->pid, len, DEVICE_NAME ,get_major(filp), get_minor(filp));
 
-        wait_event_interruptible(active_flow->pending_requests, check_if_bytes_are_available(active_flow, len));
+        wait_event_interruptible(active_flow->pending_requests, check_if_bytes_are_available_for_read(active_flow, len));
 
         mutex_lock(&(active_flow->mu));
-        if (active_flow->standing_bytes < len) goto retry;
+        if (available_bytes_for_read(active_flow) < len) goto retry;
     }
 
-    retval = MIN(active_flow->standing_bytes, len);
-    update_standing_bytes_after_read(active_flow, len);
+    retval = MIN(available_bytes_for_read(active_flow), len);
 
     if(__do_effective_read(active_flow, buff, len, &read_bytes) != 0)
         retval = read_bytes;
@@ -348,7 +376,7 @@ retry:
 #endif
 {
     switch (cmd) {
-        case SET_PRIO_CMD:
+        case MFDF_IOCTL_SET_PRIO:
             if (arg != HIGH_PRIO && arg != LOW_PRIO)
                 return -EINVAL;
 
@@ -357,14 +385,23 @@ retry:
 
             set_active_flow(filp, arg);
             return 0;
-        case SET_READ_MODALITY_CMD:
+        case MFDF_IOCTL_SET_RMOD:
             if (arg != BLOCK && arg != NON_BLOCK)
                 return -EINVAL;
 
             printk("%s Thread %d used an ioctl on %s device [MAJOR: %d, minor: %d] to change read modality to %s",
-                   MODNAME, current->pid, DEVICE_NAME ,get_major(filp), get_minor(filp), (arg == HIGH_PRIO) ? "HIGH" : "LOW");
+                   MODNAME, current->pid, DEVICE_NAME ,get_major(filp), get_minor(filp), (arg == BLOCK) ? "BLOCK" : "NON-BLOCK");
 
             set_read_modality(filp, arg);
+            return 0;
+        case MFDF_IOCTL_SET_WMOD:
+            if (arg != BLOCK && arg != NON_BLOCK)
+                return -EINVAL;
+
+            printk("%s Thread %d used an ioctl on %s device [MAJOR: %d, minor: %d] to change write modality to %s",
+                   MODNAME, current->pid, DEVICE_NAME ,get_major(filp), get_minor(filp), (arg == BLOCK) ? "BLOCK" : "NON-BLOCK");
+
+            set_write_modality(filp, arg);
             return 0;
         default:
             return -EINVAL;

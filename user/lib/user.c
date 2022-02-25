@@ -4,7 +4,7 @@
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <errno.h>
-#include "mfdf.h"
+#include "user.h"
 
 ssize_t mfdf_prio_printf(int fd, int prio, const char *restrict format, ...)
 {

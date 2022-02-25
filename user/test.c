@@ -2,7 +2,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <mfdf.h>
+#include <mfdf/user.h>
 
 int main()
 {
@@ -15,6 +15,7 @@ int main()
     }
 
     mfdf_set_read_modality(fd,BLOCK);
+    mfdf_set_write_modality(fd,BLOCK);
     printf("Read return value: %ld\n", mfdf_prio_gets(fd, LOW_PRIO, buff, 10));
 
     // printf("Write return value: %ld\n", mfdf_printf_low(fd, "Hello everyone I'm %s and I'm writing on file descriptor %d", "Simone", fd));
