@@ -56,7 +56,6 @@ struct work_metadata {
     struct data_flow *active_flow;
     char buff[BUFSIZE];
     size_t len;
-    int block;
     struct work_struct the_work;
 };
 
@@ -112,12 +111,12 @@ static ssize_t mfdf_write(struct file *, const char __user *, size_t, loff_t *);
 #endif
 static int init_devices(void);
 static void write_on_buffer(unsigned long);
-static void  __do_effective_write(struct data_flow *, const char *, size_t, int, int, int);
+static void  __do_effective_write(struct data_flow *, const char *, size_t);
 static int  __deferred_write(struct file *, struct device_state *, const char __user *, size_t);
 static int  __do_effective_read(struct data_flow *, char __user *, size_t, int *);
 static int __always_inline __available_bytes(struct data_flow *, int);
 static int __always_inline __check_if_bytes_are_available(struct data_flow *, size_t, int);
-static int __always_inline __syncronous_write(struct data_flow *, struct file *, const char __user *, size_t);
+static int __always_inline __syncronous_write(struct data_flow *, const char __user *, size_t);
 
 
 
@@ -156,7 +155,7 @@ static void write_on_buffer(unsigned long data)
            MODNAME, current->pid, DEVICE_NAME, the_task->major, the_task->minor);
 
     mutex_lock(&(the_task->active_flow->mu));
-    __do_effective_write(the_task->active_flow, the_task->buff, the_task->len, the_task->major, the_task->minor, the_task->block);
+    __do_effective_write(the_task->active_flow, the_task->buff, the_task->len);
     mutex_unlock(&(the_task->active_flow->mu));
 
     wake_up_interruptible(&(the_task->active_flow->pending_requests));
@@ -166,23 +165,9 @@ static void write_on_buffer(unsigned long data)
     module_put(THIS_MODULE);
 }
 
-static void  __do_effective_write(struct data_flow *flow, const char *buff, size_t len, int maj, int min, int block)
+static void  __do_effective_write(struct data_flow *flow, const char *buff, size_t len)
 {
     size_t to_end_length, from_start_length;
-
-    printk("Quanto vale block: %d", block);
-
-retry:
-    if((available_bytes_for_write(flow) < len) && block) {
-        mutex_unlock(&(flow->mu));
-        printk("%s Thread %d waits until %ld bytes are ready to be written to %s device [MAJOR: %d, minor: %d]",
-               MODNAME, current->pid, len, DEVICE_NAME , maj, min);
-
-        wait_event_interruptible(flow->pending_requests, check_if_bytes_are_available_for_write(flow, len));
-
-        mutex_lock(&(flow->mu));
-        if (available_bytes_for_write(flow) < len) goto retry;
-    }
 
     if(flow->off[WOFF] >= flow->off[ROFF]) {
         to_end_length = MIN(len, (BUFSIZE - flow->off[WOFF]));
@@ -231,7 +216,7 @@ static int mfdf_release(struct inode *inode, struct file *filp)
     return 0;
 }
 
-static int __always_inline __syncronous_write(struct data_flow *flow, struct file *filp, const char __user *user_buffer, size_t len)
+static int __always_inline __syncronous_write(struct data_flow *flow, const char __user *user_buffer, size_t len)
 {
     char *kernel_buffer;
     if((kernel_buffer = (char *)kzalloc(BUFSIZE, GFP_KERNEL)) == NULL)
@@ -240,7 +225,7 @@ static int __always_inline __syncronous_write(struct data_flow *flow, struct fil
     if(copy_from_user(kernel_buffer, user_buffer, len) != 0)
         return -ENOMEM;
 
-    __do_effective_write(flow, kernel_buffer, len, get_major(filp), get_minor(filp), is_block_write(filp));
+    __do_effective_write(flow, kernel_buffer, len);
     kfree(kernel_buffer);
     return 0;
 }
@@ -260,7 +245,6 @@ static int  __deferred_write(struct file *filp, struct device_state *dev, const 
     the_task->minor = get_minor(filp);
     the_task->active_flow = get_active_flow(filp);
     the_task->len = len;
-    the_task->block = is_block_write(filp);
     if (copy_from_user(the_task->buff, buff, len) != 0) {
         kfree(the_task);
         return -ENOMEM;
@@ -286,10 +270,22 @@ static ssize_t mfdf_write(struct file * filp, const char __user *buff, size_t le
 
     mutex_lock(&(active_flow->mu));
 
+retry:
+    if((available_bytes_for_write(active_flow) < len) && is_block_write(filp)) {
+        mutex_unlock(&(active_flow->mu));
+        printk("%s Thread %d waits until %ld bytes are ready to be written to %s device [MAJOR: %d, minor: %d]",
+               MODNAME, current->pid, len, DEVICE_NAME , get_major(filp), get_minor(filp));
+
+        wait_event_interruptible(active_flow->pending_requests, check_if_bytes_are_available_for_write(active_flow, len));
+
+        mutex_lock(&(active_flow->mu));
+        if (available_bytes_for_write(active_flow) < len) goto retry;
+    }
+
     retval = MIN(available_bytes_for_write(active_flow) - active_flow->pending_bytes, len);
 
     if(is_high_active(filp)) {
-        if((write_operation_retval = __syncronous_write(active_flow, filp, buff, len)) != 0)
+        if((write_operation_retval = __syncronous_write(active_flow, buff, len)) != 0)
             retval = write_operation_retval;
     } else {
         if((write_operation_retval = __deferred_write(filp, the_device, buff, len)) != 0)
@@ -365,6 +361,7 @@ retry:
         retval = read_bytes;
 
     mutex_unlock(&(active_flow->mu));
+    wake_up_interruptible(&(active_flow->pending_requests));
 
     return retval;
 }
