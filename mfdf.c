@@ -20,7 +20,7 @@ MODULE_DESCRIPTION("Multi flow device file");
 
 
 /* "Constants" macros */
-#define MODNAME "[SOA-PROJECT]"     // Module name, useful for debug printk
+#define MODNAME "[MFDF]"     // Module name, useful for debug printk
 #define DEVICE_NAME "multi-flow"    // Device name, useful for debug printk
 #define MINORS (128)                // Number of minors available
 #define BUFSIZE (PAGE_SIZE)         // Size of buffer
@@ -267,7 +267,7 @@ static ssize_t mfdf_write(struct file * filp, const char __user *buff, size_t le
     the_device = devs + get_minor(filp);
     active_flow = get_active_flow(filp);
 
-    if (is_block_read) {
+    if (is_block_write(filp)) {
         mutex_lock(&(active_flow->mu));
     } else {
         if (!mutex_trylock(&(active_flow->mu)))
@@ -345,7 +345,7 @@ static ssize_t mfdf_read(struct file *filp, char __user *buff, size_t len, loff_
     the_device = devs + get_minor(filp);
     active_flow = get_active_flow(filp);
 
-    if (is_block_read) {
+    if (is_block_read(filp)) {
         mutex_lock(&(active_flow->mu));
     } else {
         if (!mutex_trylock(&(active_flow->mu)))

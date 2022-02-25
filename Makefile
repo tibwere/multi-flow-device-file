@@ -1,7 +1,7 @@
-obj-m += multi-flow-device-file.o
+obj-m += mfdf.o
 
 PREFIX  = /usr/local
-MODNAME = multi-flow-device-file
+MODNAME = mfdf
 
 build:
 	make -C /lib/modules/$(shell uname -r)/build M=$(shell pwd) modules
