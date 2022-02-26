@@ -20,8 +20,8 @@ MODULE_DESCRIPTION("Multi flow device file");
 int major;
 module_param(major, int, 0440);
 
-int enable = 1; // default state is enable
-module_param(enable, int, 0660);
+int enable[MINORS] = {[0 ... (MINORS-1)] = 1}; // default state is enable
+module_param_array(enable, int, NULL, 0660);
 
 struct device_state devs[MINORS];
 
@@ -122,14 +122,15 @@ static void write_on_buffer(unsigned long data)
 
 static int mfdf_open(struct inode *inode, struct file *filp)
 {
+        int minor;
         struct device_state *the_device;
         printk("%s Thread %d has called an open on %s device [MAJOR: %d, minor: %d]",
                MODNAME, current->pid, DEVICE_NAME, get_major(filp), get_minor(filp));
 
-        if (!enable)
+        minor = get_minor(filp);
+        the_device = devs + minor;
+        if (!enable[minor])
                 return -EAGAIN;
-
-        the_device = devs + get_minor(filp);
 
         filp->private_data = (struct session_metadata *)kzalloc(sizeof(struct session_metadata), GFP_KERNEL);
         if (unlikely(filp->private_data == NULL))
