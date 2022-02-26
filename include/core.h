@@ -1,6 +1,7 @@
 #ifndef __H_CORE__
 #define __H_CORE__
 
+#include <linux/kconfig.h> // for CONFIG_HZ constant
 
 /* "Constants" macros */
 #define MODNAME "[MFDF]"         // Module name, useful for debug printk
@@ -63,9 +64,12 @@ struct work_metadata {
  */
 struct session_metadata {
         atomic_t idx;
+        atomic_t timeout;
         volatile unsigned char READ_MODALITY : 1;
         volatile unsigned char WRITE_MODALITY : 1;
 };
+
+#define DEFAULT_TOUT (5)
 
 /*
  * Utility macros to "easily" access the fields of the session_metadata struct
@@ -79,6 +83,8 @@ struct session_metadata {
 #define is_block_write(filp) (((struct session_metadata *)filp->private_data)->WRITE_MODALITY == BLOCK)
 #define set_read_modality(filp, new) ((struct session_metadata *)filp->private_data)->READ_MODALITY = new
 #define set_write_modality(filp, new) ((struct session_metadata *)filp->private_data)->WRITE_MODALITY = new
+#define get_timeout(filp) atomic_read(__session_metadata_addr(filp, timeout)) * CONFIG_HZ
+#define set_timeout(filp, new) atomic_set(__session_metadata_addr(filp,timeout), new)
 
 
 #endif // !__H_CORE__

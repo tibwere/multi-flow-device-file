@@ -1,11 +1,7 @@
 #define EXPORT_SYMTAB
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/init.h>
 #include <linux/fs.h>
-#include <linux/sched.h>
-#include <linux/pid.h>
-#include <linux/tty.h>
 #include <linux/version.h>
 #include <linux/string.h>
 #include <linux/slab.h>
@@ -22,7 +18,7 @@ MODULE_DESCRIPTION("Multi flow device file");
 
 /* Global variables/module parameters */
 int major;
-module_param(major, int, 0660);
+module_param(major, int, 0440);
 
 struct device_state devs[MINORS];
 
@@ -136,6 +132,7 @@ static int mfdf_open(struct inode *inode, struct file *filp)
         // Default active flow is the low priority one
         set_active_flow(filp, LOW_PRIO);
         init_modality(filp);
+        set_timeout(filp, DEFAULT_TOUT);
 
         return 0;
 }
@@ -195,7 +192,7 @@ static int  __deferred_write(struct file *filp, struct device_state *dev, const 
 
 static ssize_t mfdf_write(struct file * filp, const char __user *buff, size_t len, loff_t *off)
 {
-        int write_operation_retval, retval;
+        int write_operation_retval, retval, wait_return_value;
         struct device_state *the_device;
         struct data_flow *active_flow;
 
@@ -218,10 +215,19 @@ retry:
                 printk("%s Thread %d waits until %ld bytes are ready to be written to %s device [MAJOR: %d, minor: %d]",
                        MODNAME, current->pid, len, DEVICE_NAME , get_major(filp), get_minor(filp));
 
-                wait_event_interruptible(active_flow->pending_requests, check_if_bytes_are_available_for_write(active_flow, len));
+                wait_return_value = wait_event_interruptible_timeout(
+                                active_flow->pending_requests,
+                                check_if_bytes_are_available_for_write(active_flow, len),
+                                get_timeout(filp)
+                        );
 
                 mutex_lock(&(active_flow->mu));
-                if (available_bytes_for_write(active_flow) < len) goto retry;
+                if(wait_return_value == 0) {
+                        mutex_unlock(&(active_flow->mu));
+                        return -ETIME;
+                } else if(wait_return_value == -ERESTARTSYS || available_bytes_for_write(active_flow) < len) {
+                        goto retry;
+                }
         }
 
         retval = MIN(available_bytes_for_write(active_flow) - active_flow->pending_bytes, len);
@@ -275,7 +281,7 @@ static int __do_effective_read(struct data_flow *flow, char __user *buff, size_t
 
 static ssize_t mfdf_read(struct file *filp, char __user *buff, size_t len, loff_t *off)
 {
-        int read_bytes, retval;
+        int read_bytes, retval, wait_return_value;
         struct device_state *the_device;
         struct data_flow *active_flow;
 
@@ -298,10 +304,20 @@ retry:
                 printk("%s Thread %d waits until %ld bytes are ready to be read from %s device [MAJOR: %d, minor: %d]",
                        MODNAME, current->pid, len, DEVICE_NAME ,get_major(filp), get_minor(filp));
 
-                wait_event_interruptible(active_flow->pending_requests, check_if_bytes_are_available_for_read(active_flow, len));
+                wait_return_value = wait_event_interruptible_timeout(
+                                active_flow->pending_requests,
+                                check_if_bytes_are_available_for_read(active_flow, len),
+                                get_timeout(filp)
+                        );
 
                 mutex_lock(&(active_flow->mu));
-                if (available_bytes_for_read(active_flow) < len) goto retry;
+
+                if(wait_return_value == 0) {
+                        mutex_unlock(&(active_flow->mu));
+                        return -ETIME;
+                } else if(wait_return_value == -ERESTARTSYS || available_bytes_for_read(active_flow) < len) {
+                        goto retry;
+                }
         }
 
         retval = MIN(available_bytes_for_read(active_flow), len);
@@ -323,7 +339,7 @@ static long mfdf_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 #endif
 {
         switch (cmd) {
-case MFDF_IOCTL_SET_PRIO:
+                case MFDF_IOCTL_SET_PRIO:
                         if (arg != HIGH_PRIO && arg != LOW_PRIO)
                                 return -EINVAL;
 
@@ -349,6 +365,12 @@ case MFDF_IOCTL_SET_PRIO:
                                MODNAME, current->pid, DEVICE_NAME ,get_major(filp), get_minor(filp), (arg == BLOCK) ? "BLOCK" : "NON-BLOCK");
 
                         set_write_modality(filp, arg);
+                        return 0;
+                case MFDF_IOCTL_SET_TOUT:
+                        printk("%s Thread %d used an ioctl on %s device [MAJOR: %d, minor: %d] to set timeout for blocking operations to %ld",
+                               MODNAME, current->pid, DEVICE_NAME ,get_major(filp), get_minor(filp), arg);
+
+                        set_timeout(filp, arg);
                         return 0;
                 default:
                         return -EINVAL;
