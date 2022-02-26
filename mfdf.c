@@ -20,6 +20,9 @@ MODULE_DESCRIPTION("Multi flow device file");
 int major;
 module_param(major, int, 0440);
 
+int enable = 1; // default state is enable
+module_param(enable, int, 0660);
+
 struct device_state devs[MINORS];
 
 /* MIN and MAX utility macros */
@@ -55,18 +58,18 @@ static int __always_inline __available_bytes(struct data_flow *flow, int type)
 #define available_bytes_for_write(flow) __available_bytes(flow, 1)
 
 
-static int __always_inline __check_if_bytes_are_available(struct data_flow *flow, size_t len, int type)
+static int __always_inline __check_if_bytes_are_available(struct data_flow *flow, int type)
 {
         int ret;
         mutex_lock(&(flow->mu));
-        ret = (__available_bytes(flow, type) >= len);
+        ret = (__available_bytes(flow, type) > 0);
         mutex_unlock(&(flow->mu));
 
         return ret;
 }
 
-#define check_if_bytes_are_available_for_read(flow, len) __check_if_bytes_are_available(flow, len, 0)
-#define check_if_bytes_are_available_for_write(flow, len) __check_if_bytes_are_available(flow, len, 1)
+#define check_if_bytes_are_available_for_read(flow) __check_if_bytes_are_available(flow, 0)
+#define check_if_bytes_are_available_for_write(flow) __check_if_bytes_are_available(flow, 1)
 
 
 static void  __do_effective_write(struct data_flow *flow, const char *buff, size_t len)
@@ -122,6 +125,9 @@ static int mfdf_open(struct inode *inode, struct file *filp)
         struct device_state *the_device;
         printk("%s Thread %d has called an open on %s device [MAJOR: %d, minor: %d]",
                MODNAME, current->pid, DEVICE_NAME, get_major(filp), get_minor(filp));
+
+        if (!enable)
+                return -EAGAIN;
 
         the_device = devs + get_minor(filp);
 
@@ -210,14 +216,14 @@ static ssize_t mfdf_write(struct file * filp, const char __user *buff, size_t le
         }
 
 retry:
-        if((available_bytes_for_write(active_flow) < len) && is_block_write(filp)) {
+        if((available_bytes_for_write(active_flow) == 0) && is_block_write(filp)) {
                 mutex_unlock(&(active_flow->mu));
                 printk("%s Thread %d waits until %ld bytes are ready to be written to %s device [MAJOR: %d, minor: %d]",
                        MODNAME, current->pid, len, DEVICE_NAME , get_major(filp), get_minor(filp));
 
                 wait_return_value = wait_event_interruptible_timeout(
                                 active_flow->pending_requests,
-                                check_if_bytes_are_available_for_write(active_flow, len),
+                                check_if_bytes_are_available_for_write(active_flow),
                                 get_timeout(filp)
                         );
 
@@ -225,7 +231,7 @@ retry:
                 if(wait_return_value == 0) {
                         mutex_unlock(&(active_flow->mu));
                         return -ETIME;
-                } else if(wait_return_value == -ERESTARTSYS || available_bytes_for_write(active_flow) < len) {
+                } else if(wait_return_value == -ERESTARTSYS || available_bytes_for_write(active_flow) == 0) {
                         goto retry;
                 }
         }
@@ -299,14 +305,14 @@ static ssize_t mfdf_read(struct file *filp, char __user *buff, size_t len, loff_
         }
 
 retry:
-        if((available_bytes_for_read(active_flow) < len) && is_block_read(filp)) {
+        if((available_bytes_for_read(active_flow) == 0) && is_block_read(filp)) {
                 mutex_unlock(&(active_flow->mu));
                 printk("%s Thread %d waits until %ld bytes are ready to be read from %s device [MAJOR: %d, minor: %d]",
                        MODNAME, current->pid, len, DEVICE_NAME ,get_major(filp), get_minor(filp));
 
                 wait_return_value = wait_event_interruptible_timeout(
                                 active_flow->pending_requests,
-                                check_if_bytes_are_available_for_read(active_flow, len),
+                                check_if_bytes_are_available_for_read(active_flow),
                                 get_timeout(filp)
                         );
 
@@ -315,7 +321,7 @@ retry:
                 if(wait_return_value == 0) {
                         mutex_unlock(&(active_flow->mu));
                         return -ETIME;
-                } else if(wait_return_value == -ERESTARTSYS || available_bytes_for_read(active_flow) < len) {
+                } else if(wait_return_value == -ERESTARTSYS || available_bytes_for_read(active_flow) == 0) {
                         goto retry;
                 }
         }
