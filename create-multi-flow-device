@@ -7,7 +7,7 @@ usage() {
 [ "$EUID" -ne 0 ] && echo "This script must be run as root!" && exit 1
 [ "$#" -eq 1 ] && [ "${1}" = "-h" ] && usage && exit 0
 
-MODULENAME="multi_flow_device_file" # Change this according to module name!
+MODULENAME="mfdf" # Change this according to module name!
 MAJORNUMBER=$(cat /sys/module/${MODULENAME}/parameters/major 2>/dev/null)
 MINORNUMBER=0
 
