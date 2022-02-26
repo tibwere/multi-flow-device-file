@@ -3,7 +3,7 @@
 
 #include <linux/ioctl.h>
 
-#define MFDF_IOCTL_MAGIC (0x29)
+#define MFDF_IOCTL_MAGIC    (0x29)
 #define MFDF_IOCTL_SET_PRIO _IOW(MFDF_IOCTL_MAGIC, 0, int)
 #define MFDF_IOCTL_SET_RMOD _IOW(MFDF_IOCTL_MAGIC, 1, int)
 #define MFDF_IOCTL_SET_WMOD _IOW(MFDF_IOCTL_MAGIC, 2, int)
