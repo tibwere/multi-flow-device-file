@@ -1,11 +1,10 @@
 *.cmd
 *.o
-*.a
-*.so
 *.mod
 *.mod.c
 *.mod.o
 *.ko
 modules.order
 Module.symvers
-user/test-mfdf
+user/obj
+user/bin/
