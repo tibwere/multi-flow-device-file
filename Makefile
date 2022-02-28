@@ -9,7 +9,7 @@ build:
 mount:
 	insmod $(MODNAME).ko
 	mkdir -p $(PREFIX)/include/mfdf
-	install -m 755 include/ioctl.h $(PREFIX)/include/mfdf/ioctl.h
+	install -m 644 include/ioctl.h $(PREFIX)/include/mfdf/ioctl.h
 
 .PHONY: clean clean-all
 
