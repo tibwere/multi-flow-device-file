@@ -4,7 +4,7 @@
 #include <linux/kconfig.h> // for CONFIG_HZ constant
 
 /* "Constants" macros */
-#define MODNAME "MFDF:"         // Module name, useful for debug printk
+#define MODNAME "MFDF:"          // Module name, useful for debug printk
 #define DEVICE_NAME "multi-flow" // Device name, useful for debug printk
 #define MINORS (128)             // Number of minors available
 #define BUFSIZE (PAGE_SIZE)      // Size of buffer

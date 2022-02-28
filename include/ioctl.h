@@ -12,7 +12,7 @@
 #define LOW_PRIO  (0)
 #define HIGH_PRIO (1)
 
-#define NON_BLOCK (0)
-#define BLOCK     (1)
+#define BLOCK     (0)
+#define NON_BLOCK (1)
 
 #endif // !__H_IOCTL__
