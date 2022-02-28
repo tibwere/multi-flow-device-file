@@ -4,7 +4,6 @@
 *.mod.c
 *.mod.o
 *.ko
+*.a
 modules.order
 Module.symvers
-user/obj
-user/bin/
