@@ -19,11 +19,12 @@
  * and some fields for the management of the deferred work
  */
 struct data_flow {
-        struct mutex mu;
+        struct mutex           mu;
         struct wait_queue_head pending_requests;
-        char   *buffer;
-        int    off[2];
-        int    pending_bytes;
+        char                   *buffer;
+        int                    off[2];
+        int                    pending_bytes;
+        atomic_t               pending_threads;
 };
 
 /* Indexes of the off array belonging to the data_flow struct */

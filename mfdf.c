@@ -42,28 +42,6 @@ static struct kobject *mfdf_sys_kobj;
 #define get_minor(session)      MINOR(session->f_dentry->d_inode->i_rdev)
 #endif
 
-static ssize_t sb_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
-{
-	return sprintf(buf, "Sto leggendo gli standing bytes\n");
-}
-
-
-static ssize_t sb_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
-{
-        return -EACCES;
-}
-
-
-static ssize_t st_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
-{
-	return sprintf(buf, "Sto leggendo gli standing threads\n");
-}
-
-
-static ssize_t st_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
-{
-        return -EACCES;
-}
 
 static int __always_inline __available_bytes(struct data_flow *flow, int type)
 {
@@ -93,6 +71,55 @@ static int __always_inline __check_if_bytes_are_available(struct data_flow *flow
 
 #define check_if_bytes_are_available_for_read(flow) __check_if_bytes_are_available(flow, 0)
 #define check_if_bytes_are_available_for_write(flow) __check_if_bytes_are_available(flow, 1)
+
+
+static ssize_t sb_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+        int ret, i, high_av, low_av;
+
+        for(i=0, ret=0; i<MINORS; ++i) {
+                mutex_lock(&(devs[i].flows[LOW_PRIO].mu));
+                low_av = available_bytes_for_read(&(devs[i].flows[LOW_PRIO]));
+                mutex_unlock(&(devs[i].flows[LOW_PRIO].mu));
+
+                mutex_lock(&(devs[i].flows[HIGH_PRIO].mu));
+                high_av = available_bytes_for_read(&(devs[i].flows[HIGH_PRIO]));
+                mutex_unlock(&(devs[i].flows[HIGH_PRIO].mu));
+
+                ret += sprintf(buf + ret, "%3d %4d %4d\n", i, low_av, high_av);
+        }
+
+        return ret;
+}
+
+
+static ssize_t sb_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
+{
+        return -EACCES;
+}
+
+
+static ssize_t st_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+        int ret, i;
+        struct data_flow *lowf, *highf;
+
+        for(i=0, ret=0; i<MINORS; ++i) {
+                lowf = &(devs[i].flows[LOW_PRIO]);
+                highf = &(devs[i].flows[HIGH_PRIO]);
+                ret += sprintf(buf + ret, "%3d %4d %4d\n",
+                               i, atomic_read(&(lowf->pending_threads)),
+                               atomic_read(&(highf->pending_threads)));
+        }
+
+        return ret;
+}
+
+
+static ssize_t st_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
+{
+        return -EACCES;
+}
 
 
 static void  __do_effective_write(struct data_flow *flow, const char *buff, size_t len)
@@ -245,11 +272,13 @@ retry:
                 pr_info("%s thread %d waits until %ld bytes are ready to be written to %s device [MAJOR: %d, minor: %d]",
                        MODNAME, current->pid, len, DEVICE_NAME , get_major(filp), get_minor(filp));
 
+                atomic_inc(&(active_flow->pending_threads));
                 wait_return_value = wait_event_interruptible_timeout(
                                 active_flow->pending_requests,
                                 check_if_bytes_are_available_for_write(active_flow),
                                 get_timeout(filp)
                         );
+                atomic_dec(&(active_flow->pending_threads));
 
                 mutex_lock(&(active_flow->mu));
                 if(wait_return_value == 0) {
@@ -334,11 +363,13 @@ retry:
                 pr_info("%s thread %d waits until %ld bytes are ready to be read from %s device [MAJOR: %d, minor: %d]",
                        MODNAME, current->pid, len, DEVICE_NAME ,get_major(filp), get_minor(filp));
 
+                atomic_inc(&(active_flow->pending_threads));
                 wait_return_value = wait_event_interruptible_timeout(
                                 active_flow->pending_requests,
                                 check_if_bytes_are_available_for_read(active_flow),
                                 get_timeout(filp)
                         );
+                atomic_dec(&(active_flow->pending_threads));
 
                 mutex_lock(&(active_flow->mu));
 
