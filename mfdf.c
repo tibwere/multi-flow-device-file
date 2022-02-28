@@ -15,15 +15,16 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Simone Tiberi <simone.tiberi.98@gmail.com>");
 MODULE_DESCRIPTION("Multi flow device file");
 
-
-/* Global variables/module parameters */
+/* Global variables/parameters */
 int major;
-module_param(major, int, 0440);
+int enable[MINORS] = {[0 ... (MINORS-1)] = 1};
 
-int enable[MINORS] = {[0 ... (MINORS-1)] = 1}; // default state is enable
+module_param(major, int, 0440);
 module_param_array(enable, int, NULL, 0660);
 
 struct device_state devs[MINORS];
+static struct kobject *mfdf_sys_kobj;
+
 
 /* MIN and MAX utility macros */
 #define MIN(a,b) (((a)<(b))?(a):(b))
@@ -41,6 +42,28 @@ struct device_state devs[MINORS];
 #define get_minor(session)      MINOR(session->f_dentry->d_inode->i_rdev)
 #endif
 
+static ssize_t sb_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	return sprintf(buf, "Sto leggendo gli standing bytes\n");
+}
+
+
+static ssize_t sb_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
+{
+        return -EACCES;
+}
+
+
+static ssize_t st_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	return sprintf(buf, "Sto leggendo gli standing threads\n");
+}
+
+
+static ssize_t st_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
+{
+        return -EACCES;
+}
 
 static int __always_inline __available_bytes(struct data_flow *flow, int type)
 {
@@ -99,7 +122,7 @@ static void  __do_effective_write(struct data_flow *flow, const char *buff, size
 static void write_on_buffer(unsigned long data)
 {
         struct work_metadata *the_task = (struct work_metadata *)container_of((void*)data,struct work_metadata,the_work);
-        printk("%s kworker %d handle a write operation on the low priority flow of %s device [MAJOR: %d, minor: %d]",
+        pr_info("%s kworker %d handle a write operation on the low priority flow of %s device [MAJOR: %d, minor: %d]",
                MODNAME, current->pid, DEVICE_NAME, the_task->major, the_task->minor);
 
         mutex_lock(&(the_task->active_flow->mu));
@@ -124,7 +147,7 @@ static int mfdf_open(struct inode *inode, struct file *filp)
 {
         int minor;
         struct device_state *the_device;
-        printk("%s Thread %d has called an open on %s device [MAJOR: %d, minor: %d]",
+        pr_info("%s thread %d has called an open on %s device [MAJOR: %d, minor: %d]",
                MODNAME, current->pid, DEVICE_NAME, get_major(filp), get_minor(filp));
 
         minor = get_minor(filp);
@@ -147,7 +170,7 @@ static int mfdf_open(struct inode *inode, struct file *filp)
 
 static int mfdf_release(struct inode *inode, struct file *filp)
 {
-        printk("%s Thread %d has called a release on %s device [MAJOR: %d, minor: %d]",
+        pr_info("%s thread %d has called a release on %s device [MAJOR: %d, minor: %d]",
                MODNAME, current->pid, DEVICE_NAME, get_major(filp), get_minor(filp));
 
         kfree(filp->private_data);
@@ -203,7 +226,7 @@ static ssize_t mfdf_write(struct file * filp, const char __user *buff, size_t le
         struct device_state *the_device;
         struct data_flow *active_flow;
 
-        printk("%s Thread %d has called a write on %s device [MAJOR: %d, minor: %d]",
+        pr_info("%s thread %d has called a write on %s device [MAJOR: %d, minor: %d]",
                MODNAME, current->pid, DEVICE_NAME, get_major(filp), get_minor(filp));
 
         the_device = devs + get_minor(filp);
@@ -219,7 +242,7 @@ static ssize_t mfdf_write(struct file * filp, const char __user *buff, size_t le
 retry:
         if((available_bytes_for_write(active_flow) == 0) && is_block_write(filp)) {
                 mutex_unlock(&(active_flow->mu));
-                printk("%s Thread %d waits until %ld bytes are ready to be written to %s device [MAJOR: %d, minor: %d]",
+                pr_info("%s thread %d waits until %ld bytes are ready to be written to %s device [MAJOR: %d, minor: %d]",
                        MODNAME, current->pid, len, DEVICE_NAME , get_major(filp), get_minor(filp));
 
                 wait_return_value = wait_event_interruptible_timeout(
@@ -292,7 +315,7 @@ static ssize_t mfdf_read(struct file *filp, char __user *buff, size_t len, loff_
         struct device_state *the_device;
         struct data_flow *active_flow;
 
-        printk("%s Thread %d has called a read on %s device [MAJOR: %d, minor: %d]",
+        pr_info("%s thread %d has called a read on %s device [MAJOR: %d, minor: %d]",
                MODNAME, current->pid, DEVICE_NAME ,get_major(filp), get_minor(filp));
 
         the_device = devs + get_minor(filp);
@@ -308,7 +331,7 @@ static ssize_t mfdf_read(struct file *filp, char __user *buff, size_t len, loff_
 retry:
         if((available_bytes_for_read(active_flow) == 0) && is_block_read(filp)) {
                 mutex_unlock(&(active_flow->mu));
-                printk("%s Thread %d waits until %ld bytes are ready to be read from %s device [MAJOR: %d, minor: %d]",
+                pr_info("%s thread %d waits until %ld bytes are ready to be read from %s device [MAJOR: %d, minor: %d]",
                        MODNAME, current->pid, len, DEVICE_NAME ,get_major(filp), get_minor(filp));
 
                 wait_return_value = wait_event_interruptible_timeout(
@@ -350,7 +373,7 @@ static long mfdf_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
                         if (arg != HIGH_PRIO && arg != LOW_PRIO)
                                 return -EINVAL;
 
-                        printk("%s Thread %d used an ioctl on %s device [MAJOR: %d, minor: %d] to change priority to %s",
+                        pr_info("%s thread %d used an ioctl on %s device [MAJOR: %d, minor: %d] to change priority to %s",
                                MODNAME, current->pid, DEVICE_NAME ,get_major(filp), get_minor(filp), (arg == HIGH_PRIO) ? "HIGH" : "LOW");
 
                         set_active_flow(filp, arg);
@@ -359,7 +382,7 @@ static long mfdf_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
                         if (arg != BLOCK && arg != NON_BLOCK)
                                 return -EINVAL;
 
-                        printk("%s Thread %d used an ioctl on %s device [MAJOR: %d, minor: %d] to change read modality to %s",
+                        pr_info("%s thread %d used an ioctl on %s device [MAJOR: %d, minor: %d] to change read modality to %s",
                                MODNAME, current->pid, DEVICE_NAME ,get_major(filp), get_minor(filp), (arg == BLOCK) ? "BLOCK" : "NON-BLOCK");
 
                         set_read_modality(filp, arg);
@@ -368,13 +391,13 @@ static long mfdf_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
                         if (arg != BLOCK && arg != NON_BLOCK)
                                 return -EINVAL;
 
-                        printk("%s Thread %d used an ioctl on %s device [MAJOR: %d, minor: %d] to change write modality to %s",
+                        pr_info("%s thread %d used an ioctl on %s device [MAJOR: %d, minor: %d] to change write modality to %s",
                                MODNAME, current->pid, DEVICE_NAME ,get_major(filp), get_minor(filp), (arg == BLOCK) ? "BLOCK" : "NON-BLOCK");
 
                         set_write_modality(filp, arg);
                         return 0;
                 case MFDF_IOCTL_SET_TOUT:
-                        printk("%s Thread %d used an ioctl on %s device [MAJOR: %d, minor: %d] to set timeout for blocking operations to %ld",
+                        pr_info("%s thread %d used an ioctl on %s device [MAJOR: %d, minor: %d] to set timeout for blocking operations to %ld",
                                MODNAME, current->pid, DEVICE_NAME ,get_major(filp), get_minor(filp), arg);
 
                         set_timeout(filp, arg);
@@ -399,6 +422,26 @@ static struct file_operations fops = {
 #endif
 };
 
+/* Attribute for standing bytes */
+static struct kobj_attribute sb_attr = __ATTR(standing_bytes, 0440, sb_show, sb_store);
+
+/* Attribute for standing threads */
+static struct kobj_attribute st_attr = __ATTR(standing_threads, 0440, st_show, st_store);
+
+/* The group of attributes is useful for creating and deleting them all at once */
+static struct attribute *attrs[] = {
+	&sb_attr.attr,
+	&st_attr.attr,
+	NULL,	/* need to NULL terminate the list of attributes */
+};
+
+/*
+ * Since the group is unnamed, the files associated with the attributes
+ * will be created directly under the directory associated with the kobject
+ */
+static struct attribute_group attr_group = {
+	.attrs = attrs,
+};
 
 #define init_waitqueues(idx) \
         do { \
@@ -462,7 +505,7 @@ static int __init mfdf_initialize(void)
 {
         major = __register_chrdev(0, 0, MINORS, DEVICE_NAME, &fops);
         if (major < 0) {
-                printk("Registering multi-flow device file failed\n");
+                pr_info("%s registering multi-flow device file failed\n", MODNAME);
                 return major;
         }
 
@@ -471,7 +514,14 @@ static int __init mfdf_initialize(void)
                 return -ENOMEM;
         }
 
-        printk(KERN_INFO "Multi flow device file registered (MAJOR number: %d)\n", major);
+        mfdf_sys_kobj = kobject_create_and_add(SYS_KOBJ_NAME, kernel_kobj);
+	if(!mfdf_sys_kobj)
+		return -ENOMEM;
+
+	if(sysfs_create_group(mfdf_sys_kobj, &attr_group))
+		kobject_put(mfdf_sys_kobj);
+
+        pr_info("%s multi flow device file registered (MAJOR number: %d)\n", MODNAME, major);
         return 0;
 }
 
@@ -486,7 +536,8 @@ static void __exit mfdf_cleanup(void)
         }
 
         unregister_chrdev(major, DEVICE_NAME);
-        printk(KERN_INFO "Multi flow device file unregistered (MAJOR number: %d)\n", major);
+        kobject_put(mfdf_sys_kobj);
+        pr_info("%s multi flow device file unregistered (MAJOR number: %d)\n", MODNAME, major);
 }
 
 
