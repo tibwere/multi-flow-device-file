@@ -1,23 +1,23 @@
-IDIR = ./include
-CC = gcc
-CFLAGS = -I$(IDIR) -Wall -Wextra
-OBJDIR = ./obj
-BINDIR = ./bin
-SRCDIR = ./src
-DEPS   = ./include/user.h
-OBJS   = ./obj/user.o ./obj/test.o
-BIN    = mfdf-test-cases
+CC        = gcc
+ARC       = ar rcs
+CFLAGS    = -Wall -Wextra
+GLOBALLIB = /usr/local/lib/mfdf
+GLOBALHDR = /usr/local/include/mfdf
 
-$(OBJDIR)/%.o: $(SRCDIR)/%.c $(DEPS) make-directories
-	$(CC) -c -o $@ $< $(CFLAGS)
+build:
+	$(CC) -c user.c -o user.o $(CFLAGS)
+	$(ARC) libmfdfuser.a user.o
 
-test-cases: $(OBJS)
-	$(CC) -o $(BINDIR)/$(BIN) $^ $(CFLAGS)
+install:
+	mkdir -p $(GLOBALLIB)
+	install -m 644 user.h $(GLOBALHDR)/user.h
+	install -m 755 libmfdfuser.a $(GLOBALLIB)/libmfdfuser.a
 
-.PHONY: clean make-directories
-
-make-directories:
-	mkdir -p $(OBJDIR) $(BINDIR)
+.PHONY: clean, clean-all
 
 clean:
-	$(RM) -r $(OBJDIR)/ $(BINDIR)/
+	$(RM) -r user.o libmfdfuser.a
+
+clean-all: clean
+	$(RM) $(GLOBALLIB)/libmfdfuser.a $(GLOBALHDR)/user.h
+
