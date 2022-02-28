@@ -61,12 +61,13 @@ static int __always_inline __available_bytes(struct data_flow *flow, int type)
 
 static int __always_inline __check_if_bytes_are_available(struct data_flow *flow, int type)
 {
-        int ret;
         mutex_lock(&(flow->mu));
-        ret = (__available_bytes(flow, type) > 0);
-        mutex_unlock(&(flow->mu));
+        if (__available_bytes(flow, type) == 0) {
+                mutex_unlock(&(flow->mu));
+                return 0;
+        }
 
-        return ret;
+        return 1;
 }
 
 #define check_if_bytes_are_available_for_read(flow) __check_if_bytes_are_available(flow, 0)
@@ -266,7 +267,6 @@ static ssize_t mfdf_write(struct file * filp, const char __user *buff, size_t le
                         return -EBUSY;
         }
 
-retry:
         if((available_bytes_for_write(active_flow) == 0) && is_block_write(filp)) {
                 mutex_unlock(&(active_flow->mu));
                 pr_info("%s thread %d waits until %ld bytes are ready to be written to %s device [MAJOR: %d, minor: %d]",
@@ -280,12 +280,12 @@ retry:
                         );
                 atomic_dec(&(active_flow->pending_threads));
 
-                mutex_lock(&(active_flow->mu));
                 if(wait_return_value == 0) {
                         mutex_unlock(&(active_flow->mu));
                         return -ETIME;
-                } else if(wait_return_value == -ERESTARTSYS || available_bytes_for_write(active_flow) == 0) {
-                        goto retry;
+                } else if(wait_return_value == -ERESTARTSYS) {
+                        mutex_unlock(&(active_flow->mu));
+                        return -EINTR;
                 }
         }
 
@@ -297,6 +297,8 @@ retry:
         } else {
                 if((write_operation_retval = __deferred_write(filp, the_device, buff, len)) != 0)
                         retval = write_operation_retval;
+
+                active_flow->pending_bytes += retval;
         }
 
         mutex_unlock(&(active_flow->mu));
@@ -357,7 +359,6 @@ static ssize_t mfdf_read(struct file *filp, char __user *buff, size_t len, loff_
                         return -EBUSY;
         }
 
-retry:
         if((available_bytes_for_read(active_flow) == 0) && is_block_read(filp)) {
                 mutex_unlock(&(active_flow->mu));
                 pr_info("%s thread %d waits until %ld bytes are ready to be read from %s device [MAJOR: %d, minor: %d]",
@@ -371,13 +372,12 @@ retry:
                         );
                 atomic_dec(&(active_flow->pending_threads));
 
-                mutex_lock(&(active_flow->mu));
-
                 if(wait_return_value == 0) {
                         mutex_unlock(&(active_flow->mu));
                         return -ETIME;
-                } else if(wait_return_value == -ERESTARTSYS || available_bytes_for_read(active_flow) == 0) {
-                        goto retry;
+                } else if(wait_return_value == -ERESTARTSYS) {
+                        mutex_unlock(&(active_flow->mu));
+                        return -EINTR;
                 }
         }
 
