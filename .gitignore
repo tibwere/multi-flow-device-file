@@ -5,6 +5,7 @@
 *.mod.o
 *.ko
 *.a
+*.0p
 modules.order
 Module.symvers
 demo-mfdf
