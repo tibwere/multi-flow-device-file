@@ -25,6 +25,9 @@ int main()
                 return 1;
         }
 
+        // remove trailing newline
+        buff[strcspn(buff, "\n")] = '\0';
+
         printf("This is what I read: \"%s\" (len: %d)\n", buff, ret);
         return 0;
 }
