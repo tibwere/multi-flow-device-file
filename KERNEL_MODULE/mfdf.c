@@ -94,7 +94,7 @@ static ssize_t sb_show(struct kobject *kobj, struct kobj_attribute *attr, char *
 }
 
 
-static ssize_t sb_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
+static ssize_t forbidden_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
 {
         return -EACCES;
 }
@@ -114,12 +114,6 @@ static ssize_t st_show(struct kobject *kobj, struct kobj_attribute *attr, char *
         }
 
         return ret;
-}
-
-
-static ssize_t st_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
-{
-        return -EACCES;
 }
 
 
@@ -454,10 +448,10 @@ static struct file_operations fops = {
 };
 
 /* Attribute for standing bytes */
-static struct kobj_attribute sb_attr = __ATTR(standing_bytes, 0440, sb_show, sb_store);
+static struct kobj_attribute sb_attr = __ATTR(standing_bytes, 0440, sb_show, forbidden_store);
 
 /* Attribute for standing threads */
-static struct kobj_attribute st_attr = __ATTR(standing_threads, 0440, st_show, st_store);
+static struct kobj_attribute st_attr = __ATTR(standing_threads, 0440, st_show, forbidden_store);
 
 /* The group of attributes is useful for creating and deleting them all at once */
 static struct attribute *attrs[] = {
