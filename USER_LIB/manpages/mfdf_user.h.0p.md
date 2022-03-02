@@ -31,6 +31,7 @@ Below is a brief description of what is in the mfdf/user.h library:
         - mfdf_set_priority(fd,level):          equivalent to ioctl(fd, MFDF_IOCTL_SET_PRIO, level)
         - mfdf_set_read_modality(fd,modality):  equivalent to ioctl(fd, MFDF_IOCTL_SET_RMOD, modality)
         - mfdf_set_write_modality(fd,modality): equivalent to ioctl(fd, MFDF_IOCTL_SET_WMOD, modality)
+        - mfdf_set_timeout(fd,timeout):         equivalent to ioctl(fd, MFDF_IOCTL_SET_TOUT, timeout)
         - mfdf_printf(fd, format,...):          equivalent to mfdf_prio_printf(fd, KEEP_PRIO, format, ##__VA_ARGS__)
         - mfdf_printf_low(fd, format,...):      equivalent to mfdf_prio_printf(fd, LOW_PRIO, format, ##__VA_ARGS__)
         - mfdf_printf_high(fd, format,...):     equivalent to mfdf_prio_printf(fd, HIGH_PRIO, format, ##__VA_ARGS__)
