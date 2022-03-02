@@ -117,9 +117,12 @@ static ssize_t st_show(struct kobject *kobj, struct kobj_attribute *attr, char *
 }
 
 
-static void  __do_effective_write(struct data_flow *flow, const char *buff, size_t len)
+static int  __do_effective_write(struct data_flow *flow, const char *buff, size_t len, int prio)
 {
+        int residual;
         size_t to_end_length, from_start_length;
+
+        residual = 0;
 
         if(flow->off[WOFF] >= flow->off[ROFF]) {
                 to_end_length = MIN(len, (BUFSIZE - flow->off[WOFF]));
@@ -129,15 +132,25 @@ static void  __do_effective_write(struct data_flow *flow, const char *buff, size
                 from_start_length = 0;
         }
 
-        memcpy(flow->buffer + flow->off[WOFF], buff, to_end_length);
-        flow->off[WOFF] += to_end_length;
+        if(prio == LOW_PRIO)
+                memcpy(flow->buffer + flow->off[WOFF], buff, to_end_length);
+        else
+                residual = copy_from_user(flow->buffer + flow->off[WOFF], buff, to_end_length);
 
-        if (from_start_length > 0) {
-                memcpy(flow->buffer, buff + to_end_length, from_start_length);
-                flow->off[WOFF] = from_start_length;
+        flow->off[WOFF] += (to_end_length - residual);
+
+        if (residual == 0 && from_start_length > 0) {
+                if(prio == LOW_PRIO)
+                        memcpy(flow->buffer, buff + to_end_length, from_start_length);
+                else
+                        residual += copy_from_user(flow->buffer, buff + to_end_length, from_start_length);
+
+                flow->off[WOFF] = (from_start_length - residual);
         }
 
-        flow->pending_bytes -= (from_start_length + to_end_length);
+        flow->pending_bytes -= (from_start_length + to_end_length - residual);
+
+        return (from_start_length + to_end_length - residual);
 }
 
 
@@ -148,7 +161,7 @@ static void write_on_buffer(unsigned long data)
                MODNAME, current->pid, DEVICE_NAME, the_task->major, the_task->minor);
 
         mutex_lock(&(the_task->active_flow->mu));
-        __do_effective_write(the_task->active_flow, the_task->buff, the_task->len);
+        __do_effective_write(the_task->active_flow, the_task->buff, the_task->len, LOW_PRIO);
         mutex_unlock(&(the_task->active_flow->mu));
 
         wake_up_interruptible(&(the_task->active_flow->pending_requests));
@@ -200,23 +213,9 @@ static int mfdf_release(struct inode *inode, struct file *filp)
 }
 
 
-static int __always_inline __syncronous_write(struct data_flow *flow, const char __user *user_buffer, size_t len)
+static int  __deferred_write(struct data_flow *flow, struct workqueue_struct *queue, struct file *filp, const char __user *buff, size_t len)
 {
-        char *kernel_buffer;
-        if((kernel_buffer = (char *)kzalloc(BUFSIZE, GFP_KERNEL)) == NULL)
-                return -ENOMEM;
-
-        if(copy_from_user(kernel_buffer, user_buffer, len) != 0)
-                return -ENOMEM;
-
-        __do_effective_write(flow, kernel_buffer, len);
-        kfree(kernel_buffer);
-        return 0;
-}
-
-
-static int  __deferred_write(struct file *filp, struct device_state *dev, const char __user *buff, size_t len)
-{
+        int residual;
         struct work_metadata *the_task;
 
         if(!try_module_get(THIS_MODULE))
@@ -228,23 +227,20 @@ static int  __deferred_write(struct file *filp, struct device_state *dev, const 
 
         the_task->major = get_major(filp);
         the_task->minor = get_minor(filp);
-        the_task->active_flow = get_active_flow(filp);
+        the_task->active_flow = flow;
         the_task->len = len;
-        if (copy_from_user(the_task->buff, buff, len) != 0) {
-                kfree(the_task);
-                return -ENOMEM;
-        }
+        residual = copy_from_user(the_task->buff, buff, len);
 
         __INIT_WORK(&(the_task->the_work),(void*)write_on_buffer,(unsigned long)(&(the_task->the_work)));
-        queue_work(dev->queue, &the_task->the_work);
+        queue_work(queue, &the_task->the_work);
 
-        return 0;
+        return MIN(available_bytes_for_write(flow), (len - residual));
 }
 
 
-static ssize_t mfdf_write(struct file * filp, const char __user *buff, size_t len, loff_t *off)
+static ssize_t mfdf_write(struct file *filp, const char __user *buff, size_t len, loff_t *off)
 {
-        int write_operation_retval, retval, wait_return_value;
+        int retval;
         struct device_state *the_device;
         struct data_flow *active_flow;
 
@@ -267,31 +263,26 @@ static ssize_t mfdf_write(struct file * filp, const char __user *buff, size_t le
                        MODNAME, current->pid, len, DEVICE_NAME , get_major(filp), get_minor(filp));
 
                 atomic_inc(&(active_flow->pending_threads));
-                wait_return_value = wait_event_interruptible_timeout(
+                retval = wait_event_interruptible_timeout(
                                 active_flow->pending_requests,
                                 check_if_bytes_are_available_for_write(active_flow),
                                 get_timeout(filp)
                         );
                 atomic_dec(&(active_flow->pending_threads));
 
-                if(wait_return_value == 0) {
+                if(retval == 0) {
                         mutex_unlock(&(active_flow->mu));
                         return -ETIME;
-                } else if(wait_return_value == -ERESTARTSYS) {
+                } else if(retval == -ERESTARTSYS) {
                         mutex_unlock(&(active_flow->mu));
                         return -EINTR;
                 }
         }
 
-        retval = MIN(available_bytes_for_write(active_flow) - active_flow->pending_bytes, len);
-
         if(is_high_active(filp)) {
-                if((write_operation_retval = __syncronous_write(active_flow, buff, len)) != 0)
-                        retval = write_operation_retval;
+                retval = __do_effective_write(active_flow, buff, len, HIGH_PRIO);
         } else {
-                if((write_operation_retval = __deferred_write(filp, the_device, buff, len)) != 0)
-                        retval = write_operation_retval;
-
+                retval = __deferred_write(active_flow, the_device->queue, filp, buff, len);
                 active_flow->pending_bytes += retval;
         }
 
@@ -302,7 +293,7 @@ static ssize_t mfdf_write(struct file * filp, const char __user *buff, size_t le
 }
 
 
-static int __do_effective_read(struct data_flow *flow, char __user *buff, size_t len, int *total)
+static int __do_effective_read(struct data_flow *flow, char __user *buff, size_t len)
 {
         int residual, from_start_len, to_end_len;
 
@@ -316,27 +307,19 @@ static int __do_effective_read(struct data_flow *flow, char __user *buff, size_t
 
         residual = copy_to_user(buff, flow->buffer + flow->off[ROFF], to_end_len);
         flow->off[ROFF] += (to_end_len - residual);
-        if (unlikely(residual) != 0) {
-                *total = (len - residual);
-                return -1;
-        }
 
-        if (from_start_len > 0) {
-                residual = copy_to_user(buff + to_end_len, flow->buffer, from_start_len);
+        if (residual == 0 && from_start_len > 0) {
+                residual += copy_to_user(buff + to_end_len, flow->buffer, from_start_len);
                 flow->off[ROFF] = (from_start_len - residual);
-                if (unlikely(residual) != 0) {
-                        *total = (len - residual);
-                        return -1;
-                }
         }
 
-        return 0;
+        return (from_start_len + to_end_len - residual);
 }
 
 
 static ssize_t mfdf_read(struct file *filp, char __user *buff, size_t len, loff_t *off)
 {
-        int read_bytes, retval, wait_return_value;
+        int retval;
         struct device_state *the_device;
         struct data_flow *active_flow;
 
@@ -359,26 +342,23 @@ static ssize_t mfdf_read(struct file *filp, char __user *buff, size_t len, loff_
                        MODNAME, current->pid, len, DEVICE_NAME ,get_major(filp), get_minor(filp));
 
                 atomic_inc(&(active_flow->pending_threads));
-                wait_return_value = wait_event_interruptible_timeout(
+                retval = wait_event_interruptible_timeout(
                                 active_flow->pending_requests,
                                 check_if_bytes_are_available_for_read(active_flow),
                                 get_timeout(filp)
                         );
                 atomic_dec(&(active_flow->pending_threads));
 
-                if(wait_return_value == 0) {
+                if(retval == 0) {
                         mutex_unlock(&(active_flow->mu));
                         return -ETIME;
-                } else if(wait_return_value == -ERESTARTSYS) {
+                } else if(retval == -ERESTARTSYS) {
                         mutex_unlock(&(active_flow->mu));
                         return -EINTR;
                 }
         }
 
-        retval = MIN(available_bytes_for_read(active_flow), len);
-
-        if(__do_effective_read(active_flow, buff, len, &read_bytes) != 0)
-                retval = read_bytes;
+        retval = __do_effective_read(active_flow, buff, len);
 
         mutex_unlock(&(active_flow->mu));
         wake_up_interruptible(&(active_flow->pending_requests));
