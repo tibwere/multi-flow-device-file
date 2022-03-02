@@ -10,22 +10,55 @@
 
 #define TEST_DEV "/dev/test-md"
 #define MAJOR_SYS "/sys/module/mfdf/parameters/major"
+#define STANDING_BYTES_SYS "/sys/kernel/mfdf/standing_bytes"
 #define TABLE_ROW "%-40s %-20s [M: %3d, m: %2d]\n"
 #define TABLE_HDR "%-40s %-20s %s\n"
 #define OUTCOME_LEN 30
 #define ROW_LEN 78
-
+#define STANDING_BYTES_ROW_LEN 14
 
 struct test_case {
         const char *name;
-        int (*test_fn) (int);
+        int (*test_fn) (int, int);
 };
 
 
 /********************************************************************
  ************************* START TEST CASES *************************
  ********************************************************************/
-int test_write_less_read_more_low(int fd)
+
+int test_standing_bytes(int fd, int minor)
+{
+        int sysfd, lret, hret, standing_high, standing_low;
+        char buff[16];
+
+        lret = mfdf_printf_low(fd, "MESSAGGIO");
+        hret = mfdf_printf_high(fd, "MESSAGGIO");
+
+        if((sysfd = open(STANDING_BYTES_SYS, O_RDONLY)) == -1)
+                return -1;
+
+        if(lseek(sysfd, STANDING_BYTES_ROW_LEN * minor, SEEK_SET) == -1)
+                return -1;
+
+        if(read(sysfd, buff, 16) == -1)
+                return -1;
+
+        /* n.b. File format "%3d %4d %4d\n" */
+        standing_low = strtol(buff + 3, NULL, 10);
+        standing_high = strtol(buff + 8, NULL, 10);
+
+        // Cleanup buffer
+        mfdf_gets_low(fd, buff, 16);
+        mfdf_gets_high(fd, buff, 16);
+
+        close(fd);
+        close(sysfd);
+
+        return (lret == standing_low && hret == standing_high);
+}
+
+int test_write_less_read_more_low(int fd, __attribute__ ((unused)) int minor)
 {
         int wret, rret;
         char buff[128];
@@ -41,7 +74,7 @@ int test_write_less_read_more_low(int fd)
 }
 
 
-int test_write_less_read_more_high(int fd)
+int test_write_less_read_more_high(int fd, __attribute__ ((unused)) int minor)
 {
         int wret, rret;
         char buff[128];
@@ -57,7 +90,7 @@ int test_write_less_read_more_high(int fd)
 }
 
 
-int test_non_blocking_read_no_data(int fd)
+int test_non_blocking_read_no_data(int fd, __attribute__ ((unused)) int minor)
 {
         int ret;
         char buff[16];
@@ -70,7 +103,7 @@ int test_non_blocking_read_no_data(int fd)
 }
 
 
-int test_blocking_read_no_data(int fd)
+int test_blocking_read_no_data(int fd, __attribute__ ((unused)) int minor)
 {
         int ret;
         char buff[16];
@@ -88,6 +121,7 @@ static struct test_case test_cases[] = {
         {"Non-blocking read with no input", test_non_blocking_read_no_data},
         {"Write less byte than read ones (LOW)", test_write_less_read_more_low},
         {"Write less byte than read ones (HIGH)", test_write_less_read_more_high},
+        {"Standing bytes", test_standing_bytes},
         {NULL, NULL}
 };
 /********************************************************************
@@ -105,6 +139,8 @@ int get_major_number(void)
 
         if(read(fd, buff, 16) == -1)
                 return -1;
+
+        close(fd);
 
         return strtol(buff, NULL, 10);
 }
@@ -130,7 +166,7 @@ void do_test(int major, int minor)
                 return;
         }
 
-        ret = (the_test_case->test_fn)(fd);
+        ret = (the_test_case->test_fn)(fd, minor);
         unlink(TEST_DEV);
 
         switch(ret) {
