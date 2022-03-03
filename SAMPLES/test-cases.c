@@ -5,27 +5,107 @@
 #include <errno.h>
 #include <unistd.h>
 #include <string.h>
+#include <pthread.h>
 #include <mfdf/user.h>
 
 
 #define TEST_DEV "/dev/test-md"
 #define MAJOR_SYS "/sys/module/mfdf/parameters/major"
 #define STANDING_BYTES_SYS "/sys/kernel/mfdf/standing_bytes"
+#define STANDING_THREADS_SYS "/sys/kernel/mfdf/standing_threads"
 #define TABLE_ROW "%-40s %-20s [M: %3d, m: %2d]\n"
 #define TABLE_HDR "%-40s %-20s %s\n"
 #define OUTCOME_LEN 30
 #define ROW_LEN 78
-#define STANDING_BYTES_ROW_LEN 14
+#define STANDING_ROW_LEN 14
+#define WAIT_TIME 3
 
 struct test_case {
         const char *name;
         int (*test_fn) (int, int);
 };
 
+struct thread_args {
+        int fd;
+        int prio;
+};
+
+
+void *read_worker(void *argptr)
+{
+        struct thread_args *targs;
+        char buff[16];
+
+        targs = (struct thread_args *)argptr;
+
+        if(targs->prio == LOW_PRIO)
+                mfdf_gets_low(targs->fd, buff, 16);
+        else
+                mfdf_gets_high(targs->fd, buff, 16);
+
+        free(targs);
+        return NULL;
+}
+
 
 /********************************************************************
  ************************* START TEST CASES *************************
  ********************************************************************/
+int test_standing_threads(int fd, int minor)
+{
+        int i, j, sysfd, standing_high, standing_low, ret;
+        pthread_t ids[10];
+        struct thread_args *args;
+        char buff[80];
+
+        memset(buff, 0x41, 80); // unlock_buff = "AA[...]AA"
+
+        for(i=0; i<5; ++i) {
+                for(j=0; j<2; ++j) {
+                        if((args = malloc(sizeof(struct thread_args))) == NULL)
+                                return -1;
+
+                        args->fd = fd;
+                        args->prio = j;
+
+                        if((ret = pthread_create(&(ids[2*i + j]), NULL, read_worker, (void *)args) > 0) > 0) {
+                                errno = ret; // See manpage "Return value" section
+                                return -1;
+                        }
+                }
+        }
+
+        sleep(WAIT_TIME);
+
+        if((sysfd = open(STANDING_THREADS_SYS, O_RDONLY)) == -1)
+                return -1;
+
+        if(lseek(sysfd, STANDING_ROW_LEN * minor, SEEK_SET) == -1)
+                return -1;
+
+        if(read(sysfd, buff, 16) == -1)
+                return -1;
+
+        /* n.b. File format "%3d %4d %4d\n" */
+        standing_low = strtol(buff + 3, NULL, 10);
+        standing_high = strtol(buff + 8, NULL, 10);
+
+        // Unlock threads
+        mfdf_printf_low(fd, buff);
+        mfdf_printf_high(fd, buff);
+
+        for(i=0; i<10; ++i){
+                if((ret = pthread_join(ids[i], NULL)) > 0) {
+                        errno = ret;
+                        return -1;
+                }
+        }
+
+        close(fd);
+        close(sysfd);
+
+        return (standing_low == 5 && standing_high == 5);
+}
 
 int test_standing_bytes(int fd, int minor)
 {
@@ -38,7 +118,7 @@ int test_standing_bytes(int fd, int minor)
         if((sysfd = open(STANDING_BYTES_SYS, O_RDONLY)) == -1)
                 return -1;
 
-        if(lseek(sysfd, STANDING_BYTES_ROW_LEN * minor, SEEK_SET) == -1)
+        if(lseek(sysfd, STANDING_ROW_LEN * minor, SEEK_SET) == -1)
                 return -1;
 
         if(read(sysfd, buff, 16) == -1)
@@ -108,7 +188,7 @@ int test_blocking_read_no_data(int fd, __attribute__ ((unused)) int minor)
         int ret;
         char buff[16];
 
-        mfdf_set_timeout(fd, 2);
+        mfdf_set_timeout(fd, WAIT_TIME);
         ret = mfdf_gets_low(fd, buff, 16);
         mfdf_close(fd);
 
@@ -122,6 +202,7 @@ static struct test_case test_cases[] = {
         {"Write less byte than read ones (LOW)", test_write_less_read_more_low},
         {"Write less byte than read ones (HIGH)", test_write_less_read_more_high},
         {"Standing bytes", test_standing_bytes},
+        {"Standing threads", test_standing_threads},
         {NULL, NULL}
 };
 /********************************************************************
