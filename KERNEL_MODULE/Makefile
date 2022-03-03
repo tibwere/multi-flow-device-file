@@ -6,7 +6,7 @@ MODNAME = mfdf
 build:
 	make -C /lib/modules/$(shell uname -r)/build M=$(shell pwd) modules
 
-mount:
+install:
 	insmod $(MODNAME).ko
 	mkdir -p $(PREFIX)/include/mfdf
 	install -m 644 include/ioctl.h $(PREFIX)/include/mfdf/ioctl.h
