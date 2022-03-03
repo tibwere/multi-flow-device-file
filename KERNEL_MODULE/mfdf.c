@@ -52,7 +52,7 @@ static int __always_inline __available_bytes(struct data_flow *flow, int type)
         else
                 available_for_read =  (BUFSIZE - flow->off[ROFF]) + flow->off[WOFF];
 
-        return (type == 0) ? available_for_read : BUFSIZE - available_for_read;
+        return (type == 0) ? available_for_read : (BUFSIZE - available_for_read - flow->pending_bytes);
 }
 
 #define available_bytes_for_read(flow) __available_bytes(flow, 0)
