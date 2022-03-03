@@ -259,8 +259,8 @@ static ssize_t mfdf_write(struct file *filp, const char __user *buff, size_t len
 
         if((available_bytes_for_write(active_flow) == 0) && is_block_write(filp)) {
                 mutex_unlock(&(active_flow->mu));
-                pr_info("%s thread %d waits until %ld bytes are ready to be written to %s device [MAJOR: %d, minor: %d]",
-                       MODNAME, current->pid, len, DEVICE_NAME , get_major(filp), get_minor(filp));
+                pr_debug("%s thread %d is waiting for space available for writing on the device %s [MAJOR: %d, minor: %d]",
+                       MODNAME, current->pid, DEVICE_NAME , get_major(filp), get_minor(filp));
 
                 atomic_inc(&(active_flow->pending_threads));
                 retval = wait_event_interruptible_timeout(
@@ -272,9 +272,13 @@ static ssize_t mfdf_write(struct file *filp, const char __user *buff, size_t len
 
                 if(retval == 0) {
                         mutex_unlock(&(active_flow->mu));
+                        pr_debug("%s timer has expired for thread %d and it is not possible to write to the device %s [MAJOR: %d, minor: %d]",
+                                 MODNAME, current->pid, DEVICE_NAME, get_major(filp), get_minor(filp));
                         return -ETIME;
                 } else if(retval == -ERESTARTSYS) {
                         mutex_unlock(&(active_flow->mu));
+                        pr_debug("%s thread %d was hit with a signal while waiting for available space on device %s [MAJOR: %d, minor: %d]",
+                                 MODNAME, current->pid, DEVICE_NAME, get_major(filp), get_minor(filp));
                         return -EINTR;
                 }
         }
@@ -338,8 +342,8 @@ static ssize_t mfdf_read(struct file *filp, char __user *buff, size_t len, loff_
 
         if((available_bytes_for_read(active_flow) == 0) && is_block_read(filp)) {
                 mutex_unlock(&(active_flow->mu));
-                pr_info("%s thread %d waits until %ld bytes are ready to be read from %s device [MAJOR: %d, minor: %d]",
-                       MODNAME, current->pid, len, DEVICE_NAME ,get_major(filp), get_minor(filp));
+                pr_debug("%s thread %d is waiting for bytes to read from device %s [MAJOR: %d, minor: %d]",
+                       MODNAME, current->pid, DEVICE_NAME , get_major(filp), get_minor(filp));
 
                 atomic_inc(&(active_flow->pending_threads));
                 retval = wait_event_interruptible_timeout(
@@ -351,9 +355,13 @@ static ssize_t mfdf_read(struct file *filp, char __user *buff, size_t len, loff_
 
                 if(retval == 0) {
                         mutex_unlock(&(active_flow->mu));
+                        pr_debug("%s timer has expired for thread %d and it is not possible to read from the device %s [MAJOR: %d, minor: %d]",
+                                 MODNAME, current->pid, DEVICE_NAME, get_major(filp), get_minor(filp));
                         return -ETIME;
                 } else if(retval == -ERESTARTSYS) {
                         mutex_unlock(&(active_flow->mu));
+                        pr_debug("%s thread %d was hit with a signal while waiting for bytes to read on device %s [MAJOR: %d, minor: %d]",
+                                 MODNAME, current->pid, DEVICE_NAME, get_major(filp), get_minor(filp));
                         return -EINTR;
                 }
         }
