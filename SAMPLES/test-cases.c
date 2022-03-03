@@ -9,7 +9,7 @@
 #include <mfdf/user.h>
 
 
-#define TEST_DEV "/dev/test-md"
+#define TEST_DEV "/dev/test-mfdf"
 #define MAJOR_SYS "/sys/module/mfdf/parameters/major"
 #define STANDING_BYTES_SYS "/sys/kernel/mfdf/standing_bytes"
 #define STANDING_THREADS_SYS "/sys/kernel/mfdf/standing_threads"
@@ -58,7 +58,7 @@ int test_standing_threads(int fd, int minor)
         struct thread_args *args;
         char buff[80];
 
-        memset(buff, 0x41, 80); // unlock_buff = "AA[...]AA"
+        memset(buff, 0x41, 80); // buff = "AA[...]AA"
 
         for(i=0; i<5; ++i) {
                 for(j=0; j<2; ++j) {
@@ -112,8 +112,8 @@ int test_standing_bytes(int fd, int minor)
         int sysfd, lret, hret, standing_high, standing_low;
         char buff[16];
 
-        lret = mfdf_printf_low(fd, "MESSAGGIO");
-        hret = mfdf_printf_high(fd, "MESSAGGIO");
+        lret = mfdf_printf_low(fd, "MESSAGE");
+        hret = mfdf_printf_high(fd, "MESSAGE");
 
         if((sysfd = open(STANDING_BYTES_SYS, O_RDONLY)) == -1)
                 return -1;
@@ -145,12 +145,12 @@ int test_write_less_read_more_low(int fd, __attribute__ ((unused)) int minor)
 
         memset(buff, 0x0, 128);
 
-        wret = mfdf_printf_low(fd, "MESSAGGIO");
+        wret = mfdf_printf_low(fd, "MESSAGE");
         rret = mfdf_gets_low(fd, buff, 128);
 
         mfdf_close(fd);
 
-        return (wret == strlen("MESSAGGIO") && rret == strlen("MESSAGGIO") && strcmp(buff, "MESSAGGIO") == 0);
+        return (wret == strlen("MESSAGE") && rret == strlen("MESSAGE") && strcmp(buff, "MESSAGE") == 0);
 }
 
 
@@ -161,12 +161,46 @@ int test_write_less_read_more_high(int fd, __attribute__ ((unused)) int minor)
 
         memset(buff, 0x0, 128);
 
-        wret = mfdf_printf_high(fd, "MESSAGGIO");
+        wret = mfdf_printf_high(fd, "MESSAGE");
         rret = mfdf_gets_high(fd, buff, 128);
 
         mfdf_close(fd);
 
-        return (wret == strlen("MESSAGGIO") && rret == strlen("MESSAGGIO") && strcmp(buff, "MESSAGGIO") == 0);
+        return (wret == strlen("MESSAGE") && rret == strlen("MESSAGE") && strcmp(buff, "MESSAGE") == 0);
+}
+
+
+int test_non_blocking_write_no_space(int fd, __attribute__ ((unused)) int minor)
+{
+        int first_ret, second_ret;
+        char buff[4096];
+
+        memset(buff, 0x41, 4096); // buff = "AA[...]AA"
+
+        mfdf_set_write_modality(fd, NON_BLOCK);
+        first_ret = write(fd, buff, 4096);
+        second_ret = write(fd, "This shouldn't be written to the device", strlen("This shouldn't be written to the device"));
+
+        mfdf_close(fd);
+
+        return (first_ret == 4096 && second_ret == 0);
+}
+
+
+int test_blocking_write_no_space(int fd, __attribute__ ((unused)) int minor)
+{
+        int first_ret, second_ret;
+        char buff[4096];
+
+        memset(buff, 0x41, 4096); // buff = "AA[...]AA"
+
+        mfdf_set_timeout(fd, WAIT_TIME);
+        first_ret = write(fd, buff, 4096);
+        second_ret = write(fd, "This shouldn't be written to the device", strlen("This shouldn't be written to the device"));
+
+        mfdf_close(fd);
+
+        return (first_ret == 4096 && second_ret == -1 && errno == ETIME);
 }
 
 
@@ -199,6 +233,8 @@ int test_blocking_read_no_data(int fd, __attribute__ ((unused)) int minor)
 static struct test_case test_cases[] = {
         {"Blocking read with no input", test_blocking_read_no_data},
         {"Non-blocking read with no input", test_non_blocking_read_no_data},
+        {"Blocking write with no space", test_blocking_write_no_space},
+        {"Non-blocking write with no space", test_non_blocking_write_no_space},
         {"Write less byte than read ones (LOW)", test_write_less_read_more_low},
         {"Write less byte than read ones (HIGH)", test_write_less_read_more_high},
         {"Standing bytes", test_standing_bytes},
