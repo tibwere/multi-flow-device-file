@@ -87,6 +87,10 @@ struct session_metadata {
 #define set_write_modality(filp, new) ((struct session_metadata *)filp->private_data)->WRITE_MODALITY = new
 #define get_timeout(filp) atomic_read(__session_metadata_addr(filp, timeout)) * CONFIG_HZ
 #define set_timeout(filp, new) atomic_set(__session_metadata_addr(filp,timeout), new)
-
+#define init_modality(filp) \
+        do { \
+                ((struct session_metadata *)filp->private_data)->READ_MODALITY = 0x0; \
+                ((struct session_metadata *)filp->private_data)->WRITE_MODALITY = 0x0; \
+        } while(0)
 
 #endif // !__H_CORE__

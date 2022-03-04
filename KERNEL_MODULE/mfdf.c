@@ -1,9 +1,7 @@
 #define EXPORT_SYMTAB
-#include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/fs.h>
 #include <linux/version.h>
-#include <linux/string.h>
 #include <linux/slab.h>
 
 #include "include/ioctl.h"
@@ -16,14 +14,14 @@ MODULE_AUTHOR("Simone Tiberi <simone.tiberi.98@gmail.com>");
 MODULE_DESCRIPTION("Multi flow device file");
 
 /* Global variables/parameters */
-int major;
-int enable[MINORS] = {[0 ... (MINORS-1)] = 1};
-
+int major;                                      /* Major number associated with the device */
 module_param(major, int, 0440);
+
+int enable[MINORS] = {[0 ... (MINORS-1)] = 1};  /* Flag to enable the granularity of the minor number */
 module_param_array(enable, int, NULL, 0660);
 
-struct device_state devs[MINORS];
-static struct kobject *mfdf_sys_kobj;
+static struct device_state devs[MINORS];        /* Array of struct device_state to keep track of the state of devices */
+static struct kobject *mfdf_sys_kobj;           /* Oggetto in sys per la gestione dei parametri read-only */
 
 
 /* MIN and MAX utility macros */
@@ -43,6 +41,13 @@ static struct kobject *mfdf_sys_kobj;
 #endif
 
 
+/**
+ * It calculates, according to the type parameter passed,
+ * the space available for writing and/or reading
+ *
+ * @flow: current flow
+ * @type: 0 for read, 1 for write
+ */
 static int __always_inline __available_bytes(struct data_flow *flow, int type)
 {
         int available_for_read;
@@ -55,10 +60,23 @@ static int __always_inline __available_bytes(struct data_flow *flow, int type)
         return (type == 0) ? available_for_read : (BUFSIZE - available_for_read - flow->pending_bytes);
 }
 
+/**
+ * Macro for invoking __available_bytes without having
+ * to explicitly use the type parameter
+ */
 #define available_bytes_for_read(flow) __available_bytes(flow, 0)
 #define available_bytes_for_write(flow) __available_bytes(flow, 1)
 
 
+/**
+ * Function invoked by wait_event_interruptible_timeout
+ * to check space/data availability.
+ *
+ * The lock is released only if the check fails.
+ *
+ * @flow: current flow
+ * @type: 0 for read, 1 for write
+ */
 static int __always_inline __check_if_bytes_are_available(struct data_flow *flow, int type)
 {
         mutex_lock(&(flow->mu));
@@ -70,10 +88,24 @@ static int __always_inline __check_if_bytes_are_available(struct data_flow *flow
         return 1;
 }
 
+/**
+ * Macro for invoking __check_if_bytes_are_available without having
+ * to explicitly use the type parameter
+ */
 #define check_if_bytes_are_available_for_read(flow) __check_if_bytes_are_available(flow, 0)
 #define check_if_bytes_are_available_for_write(flow) __check_if_bytes_are_available(flow, 1)
 
 
+#define SYS_FMT_LINE "%3d %4d %4d\n"
+
+/**
+ * Function responsible for showing the standing bytes
+ * being read from the pseudofile in /sys
+ *
+ * @kobj: kernel object (/sys/kernel/mfdf)
+ * @attr: kernel attribute (/sys/kernel/mfdf/standing_bytes)
+ * @buff: buffer in which to store the requested data
+ */
 static ssize_t sb_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
 {
         int ret, i, high_av, low_av;
@@ -87,19 +119,21 @@ static ssize_t sb_show(struct kobject *kobj, struct kobj_attribute *attr, char *
                 high_av = available_bytes_for_read(&(devs[i].flows[HIGH_PRIO]));
                 mutex_unlock(&(devs[i].flows[HIGH_PRIO].mu));
 
-                ret += sprintf(buf + ret, "%3d %4d %4d\n", i, low_av, high_av);
+                ret += sprintf(buf + ret, SYS_FMT_LINE, i, low_av, high_av);
         }
 
         return ret;
 }
 
 
-static ssize_t forbidden_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
-{
-        return -EACCES;
-}
-
-
+/**
+ * Function responsible for showing the standing threads
+ * being read from the pseudofile in /sys
+ *
+ * @kobj: kernel object (/sys/kernel/mfdf)
+ * @attr: kernel attribute (/sys/kernel/mfdf/standing_threads)
+ * @buff: buffer in which to store the requested data
+ */
 static ssize_t st_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
 {
         int ret, i;
@@ -108,7 +142,7 @@ static ssize_t st_show(struct kobject *kobj, struct kobj_attribute *attr, char *
         for(i=0, ret=0; i<MINORS; ++i) {
                 lowf = &(devs[i].flows[LOW_PRIO]);
                 highf = &(devs[i].flows[HIGH_PRIO]);
-                ret += sprintf(buf + ret, "%3d %4d %4d\n",
+                ret += sprintf(buf + ret, SYS_FMT_LINE,
                                i, atomic_read(&(lowf->pending_threads)),
                                atomic_read(&(highf->pending_threads)));
         }
@@ -117,6 +151,26 @@ static ssize_t st_show(struct kobject *kobj, struct kobj_attribute *attr, char *
 }
 
 
+/**
+ * Makes it impossible to read read only parameters
+ * exposed via pseudofile in /sys/kernel/mfdf
+ */
+static ssize_t forbidden_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
+{
+        return -EACCES;
+}
+
+
+/**
+ * Last layer of writing invoked:
+ *      - directly from mfdf_write in the synchronous case
+ *      - from the write_on_buffer, executed by the kworker, in the asynchronous case
+ *
+ * @flow: current flow
+ * @buff: user buffer containing the data to be written
+ * @len:  size required
+ * @prio: priority currently set
+ */
 static int  __do_effective_write(struct data_flow *flow, const char *buff, size_t len, int prio)
 {
         int residual;
@@ -132,6 +186,11 @@ static int  __do_effective_write(struct data_flow *flow, const char *buff, size_
                 from_start_length = 0;
         }
 
+        /*
+         * If the writing takes place on the low priority stream,
+         * the memcpy is used because the user buffer has already
+         * been copied via copy_from_user in a previous function
+         */
         if(prio == LOW_PRIO)
                 memcpy(flow->buffer + flow->off[WOFF], buff, to_end_length);
         else
@@ -154,6 +213,12 @@ static int  __do_effective_write(struct data_flow *flow, const char *buff, size_
 }
 
 
+/**
+ * Function executed by the kworker to invoke the deferred write
+ * on the buffer associated with the current stream
+ *
+ * @data: pointer to work_metadata struct
+ */
 static void write_on_buffer(unsigned long data)
 {
         struct work_metadata *the_task = (struct work_metadata *)container_of((void*)data,struct work_metadata,the_work);
@@ -172,12 +237,12 @@ static void write_on_buffer(unsigned long data)
 }
 
 
-#define init_modality(filp) \
-        do { \
-                ((struct session_metadata *)filp->private_data)->READ_MODALITY = 0x0; \
-                ((struct session_metadata *)filp->private_data)->WRITE_MODALITY = 0x0; \
-        } while(0)
-
+/**
+ * File operation: open
+ *
+ * @inode: metadata associated to file
+ * @filp:  pointed by the entry of FDT
+ */
 static int mfdf_open(struct inode *inode, struct file *filp)
 {
         int minor;
@@ -203,6 +268,12 @@ static int mfdf_open(struct inode *inode, struct file *filp)
 }
 
 
+/**
+ * File operation: release
+ *
+ * @inode: metadata associated to file
+ * @filp:  pointed by the entry of FDT
+ */
 static int mfdf_release(struct inode *inode, struct file *filp)
 {
         pr_info("%s thread %d has called a release on %s device [MAJOR: %d, minor: %d]",
@@ -213,6 +284,16 @@ static int mfdf_release(struct inode *inode, struct file *filp)
 }
 
 
+/**
+ * Second function of the chain of invocations for writing on low priority flow.
+ * Prepare the metadata needed by the kworker by packing them in a special structure
+ *
+ * @flow:  current flow
+ * @queue: "single threaded" work queue in which to append the deferred write
+ * @filp:  pointed by the entry of FDT
+ * @buff:  user buffer containing the data to be written
+ * @len:   length required to write
+ */
 static int  __deferred_write(struct data_flow *flow, struct workqueue_struct *queue, struct file *filp, const char __user *buff, size_t len)
 {
         int residual;
@@ -238,6 +319,14 @@ static int  __deferred_write(struct data_flow *flow, struct workqueue_struct *qu
 }
 
 
+/**
+ * File operation: write
+ *
+ * @filp:  pointed by the entry of FDT
+ * @buff:  user buffer containing the data to be written
+ * @len:   length required to write
+ * @off:   offset to write to [DON'T CARE]
+ */
 static ssize_t mfdf_write(struct file *filp, const char __user *buff, size_t len, loff_t *off)
 {
         int retval;
@@ -297,6 +386,13 @@ static ssize_t mfdf_write(struct file *filp, const char __user *buff, size_t len
 }
 
 
+/**
+ * Second layer of the reading invoked directly by the mfdf_read
+ *
+ * @flow: current flow
+ * @buff: user buffer containing the data to be written
+ * @len:  size required
+ */
 static int __do_effective_read(struct data_flow *flow, char __user *buff, size_t len)
 {
         int residual, from_start_len, to_end_len;
@@ -321,6 +417,14 @@ static int __do_effective_read(struct data_flow *flow, char __user *buff, size_t
 }
 
 
+/**
+ * File operation: read
+ *
+ * @filp:  pointed by the entry of FDT
+ * @buff:  user buffer in which to write the read data
+ * @len:   length required to read
+ * @off:   offset to read to [DON'T CARE]
+ */
 static ssize_t mfdf_read(struct file *filp, char __user *buff, size_t len, loff_t *off)
 {
         int retval;
@@ -375,6 +479,14 @@ static ssize_t mfdf_read(struct file *filp, char __user *buff, size_t len, loff_
 }
 
 
+/**
+ * File operation: ioctl (up to v.2.6.35) unlocked_ioctl (from v 2.6.35)
+ *
+ * @inode: metadata associated to file (up to v.2.6.35)
+ * @filp:  pointed by the entry of FDT
+ * @cmd:   command required
+ * @arg:   argument of command
+ */
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(2,6,35))
 static int mfdf_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned long arg)
 #else
@@ -435,6 +547,7 @@ static struct file_operations fops = {
 #endif
 };
 
+
 /* Attribute for standing bytes */
 static struct kobj_attribute sb_attr = __ATTR(standing_bytes, 0440, sb_show, forbidden_store);
 
@@ -456,12 +569,19 @@ static struct attribute_group attr_group = {
 	.attrs = attrs,
 };
 
+
+/**
+ * Macros to summarize the initialization of wait queues
+ */
 #define init_waitqueues(idx) \
         do { \
                 init_waitqueue_head(&(devs[idx].flows[LOW_PRIO].pending_requests)); \
                 init_waitqueue_head(&(devs[idx].flows[HIGH_PRIO].pending_requests)); \
         } while(0)
 
+/**
+ * Array initialization of struct device_state devs
+ */
 static int init_devices(void) {
         int i;
         char wq_name[64];
@@ -514,6 +634,9 @@ static int init_devices(void) {
 }
 
 
+/**
+ * Module init function
+ */
 static int __init mfdf_initialize(void)
 {
         major = __register_chrdev(0, 0, MINORS, DEVICE_NAME, &fops);
@@ -539,6 +662,9 @@ static int __init mfdf_initialize(void)
 }
 
 
+/**
+ * Module cleanup function
+ */
 static void __exit mfdf_cleanup(void)
 {
         int i;
