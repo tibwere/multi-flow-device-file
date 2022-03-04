@@ -28,6 +28,8 @@ struct data_flow {
         atomic_t               pending_threads;
 };
 
+#define writable_bytes(flow) (BUFSIZE - (flow)->size_of_valid_area - (flow)->pending_bytes)
+
 
 /*
  * This structure represents the state of the i-th multi-flow device.
@@ -63,12 +65,12 @@ struct work_metadata {
  */
 struct session_metadata {
         atomic_t idx;
-        atomic_t timeout;
+        atomic_long_t timeout;
         volatile unsigned char READ_MODALITY : 1;
         volatile unsigned char WRITE_MODALITY : 1;
 };
 
-#define DEFAULT_TOUT (0x7ffffff)
+#define DEFAULT_TOUT ((long)(~0UL >> 1))
 
 /*
  * Utility macros to "easily" access the fields of the session_metadata struct
@@ -82,8 +84,8 @@ struct session_metadata {
 #define is_block_write(filp) (((struct session_metadata *)filp->private_data)->WRITE_MODALITY == BLOCK)
 #define set_read_modality(filp, new) ((struct session_metadata *)filp->private_data)->READ_MODALITY = new
 #define set_write_modality(filp, new) ((struct session_metadata *)filp->private_data)->WRITE_MODALITY = new
-#define get_timeout(filp) atomic_read(__session_metadata_addr(filp, timeout)) * CONFIG_HZ
-#define set_timeout(filp, new) atomic_set(__session_metadata_addr(filp,timeout), new)
+#define get_timeout(filp) atomic_long_read(__session_metadata_addr(filp, timeout)) * CONFIG_HZ
+#define set_timeout(filp, new) atomic_long_set(__session_metadata_addr(filp,timeout), new)
 #define init_modality(filp) \
         do { \
                 ((struct session_metadata *)filp->private_data)->READ_MODALITY = 0x0; \
