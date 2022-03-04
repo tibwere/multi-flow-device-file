@@ -22,14 +22,11 @@ struct data_flow {
         struct mutex           mu;
         struct wait_queue_head pending_requests;
         char                   *buffer;
-        int                    off[2];
+        int                    start_valid_area;
+        int                    size_of_valid_area;
         int                    pending_bytes;
         atomic_t               pending_threads;
 };
-
-/* Indexes of the off array belonging to the data_flow struct */
-#define ROFF (0)
-#define WOFF (1)
 
 
 /*

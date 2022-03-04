@@ -40,46 +40,28 @@ static struct kobject *mfdf_sys_kobj;           /* Oggetto in sys per la gestion
 #endif
 
 
-/**
- * It calculates, according to the type parameter passed,
- * the space available for writing and/or reading
- *
- * @flow: current flow
- * @type: 0 for read, 1 for write
- */
-static int __always_inline __available_bytes(struct data_flow *flow, int type)
-{
-        int available_for_read;
-
-        if (flow->off[WOFF] >= flow->off[ROFF])
-                available_for_read = flow->off[WOFF] - flow->off[ROFF];
-        else
-                available_for_read =  (BUFSIZE - flow->off[ROFF]) + flow->off[WOFF];
-
-        return (type == 0) ? available_for_read : (BUFSIZE - available_for_read - flow->pending_bytes);
-}
-
-/**
- * Macro for invoking __available_bytes without having
- * to explicitly use the type parameter
- */
-#define available_bytes_for_read(flow) __available_bytes(flow, 0)
-#define available_bytes_for_write(flow) __available_bytes(flow, 1)
+#define readable_bytes(flow) ((flow)->size_of_valid_area)
+#define writable_bytes(flow) (BUFSIZE - readable_bytes(flow) - flow->pending_bytes)
 
 
 /**
  * Function invoked by wait_event_interruptible_timeout
- * to check space/data availability.
+ * to check space availability.
  *
  * The lock is released only if the check fails.
+ *
+ * THIS FUNCTION IS PRACTICALLY IDENTICAL TO THE OTHER ONE
+ * BUT TO MAKE THE EXECUTION AS EFFICIENT AS POSSIBLE,
+ * IT WAS PREFERRED TO REPLY INSTEAD OF USING A CONSTRUCT
+ * IF NOT EASILY PREDICTABLE EVERY TIME
  *
  * @flow: current flow
  * @type: 0 for read, 1 for write
  */
-static int __always_inline __check_if_bytes_are_available(struct data_flow *flow, int type)
+static int __always_inline is_it_possible_to_write(struct data_flow *flow)
 {
         mutex_lock(&(flow->mu));
-        if (__available_bytes(flow, type) == 0) {
+        if(unlikely(writable_bytes(flow) == 0)) {
                 mutex_unlock(&(flow->mu));
                 return 0;
         }
@@ -87,12 +69,31 @@ static int __always_inline __check_if_bytes_are_available(struct data_flow *flow
         return 1;
 }
 
+
 /**
- * Macro for invoking __check_if_bytes_are_available without having
- * to explicitly use the type parameter
+ * Function invoked by wait_event_interruptible_timeout
+ * to check space availability.
+ *
+ * The lock is released only if the check fails.
+ *
+ * THIS FUNCTION IS PRACTICALLY IDENTICAL TO THE OTHER ONE
+ * BUT TO MAKE THE EXECUTION AS EFFICIENT AS POSSIBLE,
+ * IT WAS PREFERRED TO REPLY INSTEAD OF USING A CONSTRUCT
+ * IF NOT EASILY PREDICTABLE EVERY TIME
+ *
+ * @flow: current flow
+ * @type: 0 for read, 1 for write
  */
-#define check_if_bytes_are_available_for_read(flow) __check_if_bytes_are_available(flow, 0)
-#define check_if_bytes_are_available_for_write(flow) __check_if_bytes_are_available(flow, 1)
+static int __always_inline is_it_possible_to_read(struct data_flow *flow)
+{
+        mutex_lock(&(flow->mu));
+        if(unlikely(readable_bytes(flow) == 0)) {
+                mutex_unlock(&(flow->mu));
+                return 0;
+        }
+
+        return 1;
+}
 
 
 #define SYS_FMT_LINE "%3d %4d %4d\n"
@@ -111,11 +112,11 @@ static ssize_t sb_show(struct kobject *kobj, struct kobj_attribute *attr, char *
 
         for(i=0, ret=0; i<MINORS; ++i) {
                 mutex_lock(&(devs[i].flows[LOW_PRIO].mu));
-                low_av = available_bytes_for_read(&(devs[i].flows[LOW_PRIO]));
+                low_av = readable_bytes(&(devs[i].flows[LOW_PRIO]));
                 mutex_unlock(&(devs[i].flows[LOW_PRIO].mu));
 
                 mutex_lock(&(devs[i].flows[HIGH_PRIO].mu));
-                high_av = available_bytes_for_read(&(devs[i].flows[HIGH_PRIO]));
+                high_av = readable_bytes(&(devs[i].flows[HIGH_PRIO]));
                 mutex_unlock(&(devs[i].flows[HIGH_PRIO].mu));
 
                 ret += sprintf(buf + ret, SYS_FMT_LINE, i, low_av, high_av);
@@ -172,16 +173,17 @@ static ssize_t forbidden_store(struct kobject *kobj, struct kobj_attribute *attr
  */
 static int  __do_effective_write(struct data_flow *flow, const char *buff, size_t len, int prio)
 {
-        int residual;
-        size_t to_end_length, from_start_length;
+        int residual, next_write;
+        size_t to_end_length, from_start_length, total_length;
 
         residual = 0;
+        next_write = (flow->start_valid_area + flow->size_of_valid_area) % BUFSIZE;
 
-        if(flow->off[WOFF] >= flow->off[ROFF]) {
-                to_end_length = MIN(len, (BUFSIZE - flow->off[WOFF]));
-                from_start_length = MIN(len - to_end_length, flow->off[ROFF]);
+        if(next_write >= flow->start_valid_area) {
+                to_end_length = MIN(len, (BUFSIZE - next_write));
+                from_start_length = MIN(len - to_end_length, flow->start_valid_area);
         } else {
-                to_end_length = MIN(len, (flow->off[ROFF] - flow->off[WOFF]));
+                to_end_length = MIN(len, (flow->start_valid_area - next_write));
                 from_start_length = 0;
         }
 
@@ -191,24 +193,22 @@ static int  __do_effective_write(struct data_flow *flow, const char *buff, size_
          * been copied via copy_from_user in a previous function
          */
         if(prio == LOW_PRIO)
-                memcpy(flow->buffer + flow->off[WOFF], buff, to_end_length);
+                memcpy(flow->buffer + next_write, buff, to_end_length);
         else
-                residual = copy_from_user(flow->buffer + flow->off[WOFF], buff, to_end_length);
-
-        flow->off[WOFF] += (to_end_length - residual);
+                residual = copy_from_user(flow->buffer + next_write, buff, to_end_length);
 
         if (residual == 0 && from_start_length > 0) {
                 if(prio == LOW_PRIO)
                         memcpy(flow->buffer, buff + to_end_length, from_start_length);
                 else
                         residual += copy_from_user(flow->buffer, buff + to_end_length, from_start_length);
-
-                flow->off[WOFF] = (from_start_length - residual);
         }
 
-        flow->pending_bytes -= (from_start_length + to_end_length - residual);
+        total_length = from_start_length + to_end_length - residual;
+        flow->size_of_valid_area += total_length;
+        flow->pending_bytes -= total_length;
 
-        return (from_start_length + to_end_length - residual);
+        return total_length;
 }
 
 
@@ -314,7 +314,7 @@ static int  __deferred_write(struct data_flow *flow, struct workqueue_struct *qu
         __INIT_WORK(&(the_task->the_work),(void*)write_on_buffer,(unsigned long)(&(the_task->the_work)));
         queue_work(queue, &the_task->the_work);
 
-        return MIN(available_bytes_for_write(flow), (len - residual));
+        return MIN(writable_bytes(flow), (len - residual));
 }
 
 
@@ -345,7 +345,7 @@ static ssize_t mfdf_write(struct file *filp, const char __user *buff, size_t len
                         return -EBUSY;
         }
 
-        if((available_bytes_for_write(active_flow) == 0) && is_block_write(filp)) {
+        if((writable_bytes(active_flow) == 0) && is_block_write(filp)) {
                 mutex_unlock(&(active_flow->mu));
                 pr_debug("%s thread %d is waiting for space available for writing on the device %s [MAJOR: %d, minor: %d]",
                        MODNAME, current->pid, DEVICE_NAME , get_major(filp), get_minor(filp));
@@ -353,7 +353,7 @@ static ssize_t mfdf_write(struct file *filp, const char __user *buff, size_t len
                 atomic_inc(&(active_flow->pending_threads));
                 retval = wait_event_interruptible_timeout(
                                 active_flow->pending_requests,
-                                check_if_bytes_are_available_for_write(active_flow),
+                                is_it_possible_to_write(active_flow),
                                 get_timeout(filp)
                         );
                 atomic_dec(&(active_flow->pending_threads));
@@ -394,25 +394,30 @@ static ssize_t mfdf_write(struct file *filp, const char __user *buff, size_t len
  */
 static int __do_effective_read(struct data_flow *flow, char __user *buff, size_t len)
 {
-        int residual, from_start_len, to_end_len;
+        int residual, end_of_valid_area;
+        size_t from_start_length, to_end_length, total_length;
 
-        if(flow->off[WOFF] >= flow->off[ROFF]) {
-                to_end_len = MIN(len, (flow->off[WOFF] - flow->off[ROFF]));
-                from_start_len = 0;
+        residual = 0;
+        end_of_valid_area = (flow->start_valid_area + flow->size_of_valid_area - 1) % BUFSIZE;
+
+        if(end_of_valid_area >= flow->start_valid_area) {
+                to_end_length = MIN(len, flow->size_of_valid_area);
+                from_start_length = 0;
         } else {
-                to_end_len = MIN(len, (BUFSIZE - flow->off[ROFF]));
-                from_start_len = MIN(len - to_end_len, flow->off[WOFF]);
+                to_end_length = MIN(len, (BUFSIZE - flow->start_valid_area));
+                from_start_length = MIN(len - to_end_length, end_of_valid_area);
         }
 
-        residual = copy_to_user(buff, flow->buffer + flow->off[ROFF], to_end_len);
-        flow->off[ROFF] += (to_end_len - residual);
+        residual = copy_to_user(buff, flow->buffer + flow->start_valid_area, to_end_length);
 
-        if (residual == 0 && from_start_len > 0) {
-                residual += copy_to_user(buff + to_end_len, flow->buffer, from_start_len);
-                flow->off[ROFF] = (from_start_len - residual);
-        }
+        if (residual == 0 && from_start_length > 0)
+                residual += copy_to_user(buff + to_end_length, flow->buffer, from_start_length);
 
-        return (from_start_len + to_end_len - residual);
+        total_length = from_start_length + to_end_length - residual;
+        flow->start_valid_area = (flow->start_valid_area + total_length) % BUFSIZE;
+        flow->size_of_valid_area -= total_length;
+
+        return total_length;
 }
 
 
@@ -443,7 +448,7 @@ static ssize_t mfdf_read(struct file *filp, char __user *buff, size_t len, loff_
                         return -EBUSY;
         }
 
-        if((available_bytes_for_read(active_flow) == 0) && is_block_read(filp)) {
+        if((readable_bytes(active_flow) == 0) && is_block_read(filp)) {
                 mutex_unlock(&(active_flow->mu));
                 pr_debug("%s thread %d is waiting for bytes to read from device %s [MAJOR: %d, minor: %d]",
                        MODNAME, current->pid, DEVICE_NAME , get_major(filp), get_minor(filp));
@@ -451,7 +456,7 @@ static ssize_t mfdf_read(struct file *filp, char __user *buff, size_t len, loff_
                 atomic_inc(&(active_flow->pending_threads));
                 retval = wait_event_interruptible_timeout(
                                 active_flow->pending_requests,
-                                check_if_bytes_are_available_for_read(active_flow),
+                                is_it_possible_to_read(active_flow),
                                 get_timeout(filp)
                         );
                 atomic_dec(&(active_flow->pending_threads));
