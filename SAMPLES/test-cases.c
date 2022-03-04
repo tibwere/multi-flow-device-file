@@ -13,10 +13,10 @@
 #define MAJOR_SYS "/sys/module/mfdf/parameters/major"
 #define STANDING_BYTES_SYS "/sys/kernel/mfdf/standing_bytes"
 #define STANDING_THREADS_SYS "/sys/kernel/mfdf/standing_threads"
-#define TABLE_ROW "%-40s %-20s [M: %3d, m: %2d]\n"
-#define TABLE_HDR "%-40s %-20s %s\n"
+#define TABLE_ROW "%2d) %-40s %-20s [M: %3d, m: %2d]\n"
+#define TABLE_HDR "    %-40s %-20s %s\n"
 #define OUTCOME_LEN 30
-#define ROW_LEN 78
+#define ROW_LEN 81
 #define STANDING_ROW_LEN 14
 #define WAIT_TIME 3
 
@@ -298,7 +298,7 @@ void do_test(int major, int minor)
                         break;
         }
 
-        printf(TABLE_ROW, the_test_case->name, outcome, major, minor);
+        printf(TABLE_ROW, minor+1, the_test_case->name, outcome, major, minor);
 }
 
 
