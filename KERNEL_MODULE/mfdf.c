@@ -40,10 +40,6 @@ static struct kobject *mfdf_sys_kobj;           /* Oggetto in sys per la gestion
 #endif
 
 
-#define readable_bytes(flow) ((flow)->size_of_valid_area)
-#define writable_bytes(flow) (BUFSIZE - readable_bytes(flow) - flow->pending_bytes)
-
-
 /**
  * Function invoked by wait_event_interruptible_timeout
  * to check space availability.
@@ -87,7 +83,7 @@ static int __always_inline is_it_possible_to_write(struct data_flow *flow)
 static int __always_inline is_it_possible_to_read(struct data_flow *flow)
 {
         mutex_lock(&(flow->mu));
-        if(unlikely(readable_bytes(flow) == 0)) {
+        if(unlikely(flow->size_of_valid_area == 0)) {
                 mutex_unlock(&(flow->mu));
                 return 0;
         }
@@ -112,11 +108,11 @@ static ssize_t sb_show(struct kobject *kobj, struct kobj_attribute *attr, char *
 
         for(i=0, ret=0; i<MINORS; ++i) {
                 mutex_lock(&(devs[i].flows[LOW_PRIO].mu));
-                low_av = readable_bytes(&(devs[i].flows[LOW_PRIO]));
+                low_av = devs[i].flows[LOW_PRIO].size_of_valid_area;
                 mutex_unlock(&(devs[i].flows[LOW_PRIO].mu));
 
                 mutex_lock(&(devs[i].flows[HIGH_PRIO].mu));
-                high_av = readable_bytes(&(devs[i].flows[HIGH_PRIO]));
+                high_av = devs[i].flows[HIGH_PRIO].size_of_valid_area;
                 mutex_unlock(&(devs[i].flows[HIGH_PRIO].mu));
 
                 ret += sprintf(buf + ret, SYS_FMT_LINE, i, low_av, high_av);
@@ -448,7 +444,7 @@ static ssize_t mfdf_read(struct file *filp, char __user *buff, size_t len, loff_
                         return -EBUSY;
         }
 
-        if((readable_bytes(active_flow) == 0) && is_block_read(filp)) {
+        if((active_flow->size_of_valid_area == 0) && is_block_read(filp)) {
                 mutex_unlock(&(active_flow->mu));
                 pr_debug("%s thread %d is waiting for bytes to read from device %s [MAJOR: %d, minor: %d]",
                        MODNAME, current->pid, DEVICE_NAME , get_major(filp), get_minor(filp));
