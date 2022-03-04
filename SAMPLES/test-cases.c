@@ -19,6 +19,7 @@
 #define ROW_LEN 81
 #define STANDING_ROW_LEN 14
 #define WAIT_TIME 3
+#define SHOW_RESULTS
 
 struct test_case {
         const char *name;
@@ -104,6 +105,11 @@ int test_standing_threads(int fd, int minor)
         close(fd);
         close(sysfd);
 
+#ifdef SHOW_RESULTS
+        printf("STANDING LOW  [expected: 5 -> actual: %d]\n", standing_low);
+        printf("STANDING HIGH [expected: 5 -> actual: %d]\n", standing_high);
+#endif
+
         return (standing_low == 5 && standing_high == 5);
 }
 
@@ -135,6 +141,11 @@ int test_standing_bytes(int fd, int minor)
         close(fd);
         close(sysfd);
 
+#ifdef SHOW_RESULTS
+        printf("STANDING LOW   [expected: 7 (strlen(\"MESSAGE\") = %d) -> actual: %d]\n", lret, standing_low);
+        printf("STANDING HIGH  [expected: 7 (strlen(\"MESSAGE\") = %d) -> actual: %d]\n", hret, standing_high);
+#endif
+
         return (lret == standing_low && hret == standing_high);
 }
 
@@ -149,6 +160,12 @@ int test_write_less_read_more_low(int fd, __attribute__ ((unused)) int minor)
         rret = mfdf_gets_low(fd, buff, 128);
 
         mfdf_close(fd);
+
+#ifdef SHOW_RESULTS
+        printf("WRITTEN BYTES   [expected: 7 (strlen(\"MESSAGE\") = %ld) -> actual: %d]\n", strlen("MESSAGE"), wret);
+        printf("READ BYTES      [expected: 7 (strlen(\"MESSAGE\") = %ld) -> actual: %d]\n", strlen("MESSAGE"), rret);
+        printf("COMPARE STRINGS [expected: 0 (EQUALS) -> actual: %d]\n", strcmp(buff, "MESSAGE"));
+#endif
 
         return (wret == strlen("MESSAGE") && rret == strlen("MESSAGE") && strcmp(buff, "MESSAGE") == 0);
 }
@@ -165,6 +182,12 @@ int test_write_less_read_more_high(int fd, __attribute__ ((unused)) int minor)
         rret = mfdf_gets_high(fd, buff, 128);
 
         mfdf_close(fd);
+
+#ifdef SHOW_RESULTS
+        printf("WRITTEN BYTES   [expected: 7 (strlen(\"MESSAGE\") = %ld) -> actual: %d]\n", strlen("MESSAGE"), wret);
+        printf("READ BYTES      [expected: 7 (strlen(\"MESSAGE\") = %ld) -> actual: %d]\n", strlen("MESSAGE"), rret);
+        printf("COMPARE STRINGS [expected: 0 (EQUALS) -> actual: %d]\n", strcmp(buff, "MESSAGE"));
+#endif
 
         return (wret == strlen("MESSAGE") && rret == strlen("MESSAGE") && strcmp(buff, "MESSAGE") == 0);
 }
@@ -184,6 +207,10 @@ int test_non_blocking_write_no_space(int fd, __attribute__ ((unused)) int minor)
         mfdf_gets_low(fd, buff, 4096);
         mfdf_close(fd);
 
+#ifdef SHOW_RESULTS
+        printf("FIRST WRITE  [expected: 4096 -> actual: %d]\n", first_ret);
+        printf("SECOND WRITE [expected: 0 -> actual: %d]\n", second_ret);
+#endif
         return (first_ret == 4096 && second_ret == 0);
 }
 
@@ -202,6 +229,12 @@ int test_blocking_write_no_space(int fd, __attribute__ ((unused)) int minor)
         mfdf_gets_low(fd, buff, 4096);
         mfdf_close(fd);
 
+#ifdef SHOW_RESULTS
+        printf("FIRST WRITE  [expected: 4096 -> actual: %d]\n", first_ret);
+        printf("SECOND WRITE [expected: -1 -> actual: %d]\n", second_ret);
+        printf("ERRNO        [expected: %d -> actual: %d]\n", ETIME, second_ret);
+#endif
+
         return (first_ret == 4096 && second_ret == -1 && errno == ETIME);
 }
 
@@ -215,6 +248,10 @@ int test_non_blocking_read_no_data(int fd, __attribute__ ((unused)) int minor)
         ret = mfdf_gets_low(fd, buff, 16);
         mfdf_close(fd);
 
+#ifdef SHOW_RESULTS
+        printf("READ BYTES [expected: 0 -> actual: %d]\n", ret);
+#endif
+
         return (ret == 0);
 }
 
@@ -227,6 +264,11 @@ int test_blocking_read_no_data(int fd, __attribute__ ((unused)) int minor)
         mfdf_set_timeout(fd, WAIT_TIME);
         ret = mfdf_gets_low(fd, buff, 16);
         mfdf_close(fd);
+
+#ifdef SHOW_RESULTS
+        printf("READ BYTES [expected: -> -1 actual: %d]\n", ret);
+        printf("ERRNO      [expected: %d -> actual: %d]\n", ETIME, errno);
+#endif
 
         return (ret == -1 && errno == ETIME);
 }
