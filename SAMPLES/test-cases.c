@@ -13,8 +13,8 @@
 #define MAJOR_SYS "/sys/module/mfdf/parameters/major"
 #define STANDING_BYTES_SYS "/sys/kernel/mfdf/standing_bytes"
 #define STANDING_THREADS_SYS "/sys/kernel/mfdf/standing_threads"
-#define TABLE_ROW "%2d) %-40s %-20s [M: %3d, m: %2d]\n"
-#define TABLE_HDR "    %-40s %-20s %s\n"
+#define TABLE_ROW "%2d) [M: %3d, m: %2d]      %-40s %-20s\n"
+#define TABLE_HDR "    %-20s %-40s %-20s\n"
 #define OUTCOME_LEN 30
 #define ROW_LEN 81
 #define STANDING_ROW_LEN 14
@@ -181,6 +181,7 @@ int test_non_blocking_write_no_space(int fd, __attribute__ ((unused)) int minor)
         first_ret = write(fd, buff, 4096);
         second_ret = write(fd, "This shouldn't be written to the device", strlen("This shouldn't be written to the device"));
 
+        mfdf_gets_low(fd, buff, 4096);
         mfdf_close(fd);
 
         return (first_ret == 4096 && second_ret == 0);
@@ -198,6 +199,7 @@ int test_blocking_write_no_space(int fd, __attribute__ ((unused)) int minor)
         first_ret = write(fd, buff, 4096);
         second_ret = write(fd, "This shouldn't be written to the device", strlen("This shouldn't be written to the device"));
 
+        mfdf_gets_low(fd, buff, 4096);
         mfdf_close(fd);
 
         return (first_ret == 4096 && second_ret == -1 && errno == ETIME);
@@ -298,7 +300,7 @@ void do_test(int major, int minor)
                         break;
         }
 
-        printf(TABLE_ROW, minor+1, the_test_case->name, outcome, major, minor);
+        printf(TABLE_ROW, minor+1, major, minor, the_test_case->name, outcome);
 }
 
 
@@ -309,7 +311,7 @@ int main()
         major = get_major_number();
         printf("Major number detected from %s is: %d\n\n", MAJOR_SYS, major);
 
-        printf(TABLE_HDR, "TEST NAME", "OUTCOME", "DEVICE DETAILS");
+        printf(TABLE_HDR, "DEVICE DETAILS", "TEST NAME", "OUTCOME");
         for(i=0; i<ROW_LEN; ++i)
                 putchar('-');
         putchar('\n');
