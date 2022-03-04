@@ -24,9 +24,8 @@ static struct device_state devs[MINORS];        /* Array of struct device_state 
 static struct kobject *mfdf_sys_kobj;           /* Oggetto in sys per la gestione dei parametri read-only */
 
 
-/* MIN and MAX utility macros */
+/* MIN utility macro */
 #define MIN(a,b) (((a)<(b))?(a):(b))
-#define MAX(a,b) (((a)>(b))?(a):(b))
 
 /*
  * Retrieve major and minor number from the session according to
