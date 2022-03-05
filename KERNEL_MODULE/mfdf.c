@@ -667,7 +667,7 @@ static void __exit mfdf_cleanup(void)
                 destroy_workqueue(devs[i].queue);
         }
 
-        unregister_chrdev(major, DEVICE_NAME);
+        __unregister_chrdev(major, 0, MINORS, DEVICE_NAME);
         kobject_put(mfdf_sys_kobj);
         pr_debug("%s multi flow device file unregistered (MAJOR number: %d)\n", MODNAME, major);
 }
