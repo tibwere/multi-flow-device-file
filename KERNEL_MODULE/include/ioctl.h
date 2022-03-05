@@ -15,4 +15,6 @@
 #define BLOCK     (0)
 #define NON_BLOCK (1)
 
+#define DEFAULT_TOUT (0x29314)
+
 #endif // !__H_IOCTL__

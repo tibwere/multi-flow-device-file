@@ -75,7 +75,6 @@ struct session_metadata {
         volatile unsigned char WRITE_MODALITY : 1;
 };
 
-#define DEFAULT_TOUT (0x29314)
 
 
 /**
