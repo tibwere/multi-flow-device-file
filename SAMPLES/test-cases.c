@@ -1,3 +1,5 @@
+#include <asm-generic/errno-base.h>
+#include <mfdf/ioctl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
@@ -42,12 +44,7 @@ void *read_worker(void *argptr)
         char buff[16];
 
         targs = (struct thread_args *)argptr;
-
-        if(targs->prio == LOW_PRIO)
-                mfdf_gets_low(targs->fd, buff, 16);
-        else
-                mfdf_gets_high(targs->fd, buff, 16);
-
+        mfdf_prio_gets(targs->fd, targs->prio, buff, 16);
         free(targs);
         return NULL;
 }
@@ -56,14 +53,38 @@ void *read_worker(void *argptr)
 /********************************************************************
  ************************* START TEST CASES *************************
  ********************************************************************/
+int test_subsequent_low_writes(int fd, __attribute__ ((unused)) int minor)
+{
+        int i;
+        char buff[4096];
+        char temp_buff[16];
+        char expected_buff[4096];
+
+        memset(expected_buff, 0x0, 4096);
+        for (i=0; i<10; ++i) {
+                memset(temp_buff, 0x0, 16);
+                snprintf(temp_buff, 16, "Messaggio %d", i);
+                mfdf_printf(fd, temp_buff, strlen(temp_buff));
+                strcat(expected_buff, temp_buff);
+        }
+
+        sleep(WAIT_TIME);
+
+        memset(buff, 0x0, 4096);
+        mfdf_gets(fd, buff, 4096);
+
+        return strcmp(expected_buff, buff) == 0;
+}
+
+
 int test_standing_threads(int fd, int minor)
 {
         int i, j, sysfd, standing_high, standing_low, ret;
         pthread_t ids[10];
         struct thread_args *args;
-        char buff[80];
+        char buff[128];
 
-        memset(buff, 0x41, 80); // buff = "AA[...]AA"
+        memset(buff, 0x41, 128); // buff = "AA[...]AA"
 
         for(i=0; i<5; ++i) {
                 for(j=0; j<2; ++j) {
@@ -96,8 +117,10 @@ int test_standing_threads(int fd, int minor)
         standing_high = strtol(buff + 8, NULL, 10);
 
         // Unlock threads
-        mfdf_printf_low(fd, buff);
-        mfdf_printf_high(fd, buff);
+        mfdf_set_priority(fd, LOW_PRIO);
+        write(fd, buff, 80);
+        mfdf_set_priority(fd, HIGH_PRIO);
+        write(fd, buff, 80);
 
         for(i=0; i<10; ++i){
                 if((ret = pthread_join(ids[i], NULL)) > 0) {
@@ -215,7 +238,7 @@ int test_non_blocking_write_no_space(int fd, __attribute__ ((unused)) int minor)
         printf("FIRST WRITE  [expected: 4096 -> actual: %d]\n", first_ret);
         printf("SECOND WRITE [expected: 0 -> actual: %d]\n", second_ret);
 #endif
-        return (first_ret == 4096 && second_ret == 0);
+        return ((first_ret == 4096) && ((second_ret == 0) || ((second_ret == -1) && (errno == ENODEV))));
 }
 
 
@@ -287,6 +310,7 @@ static struct test_case test_cases[] = {
         {"Write less byte than read ones (HIGH)", test_write_less_read_more_high},
         {"Standing bytes", test_standing_bytes},
         {"Standing threads", test_standing_threads},
+        {"Subsequent writes on low priority", test_subsequent_low_writes},
         {NULL, NULL}
 };
 /********************************************************************
