@@ -1,11 +1,16 @@
 #include <stdio.h>
-#include <stdarg.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/ioctl.h>
-#include <errno.h>
 #include "user.h"
 
+/**
+ * Printf-like version of the write on the multi-flow device file
+ *
+ * @fd:     file descriptor
+ * @prio:   priority indicator (LOW_PRIO or HIGH_PRIO)
+ * @format: format string (as in printf)
+ * @...:    arguments va_list
+ */
 ssize_t mfdf_prio_printf(int fd, int prio, const char *restrict format, ...)
 {
         ssize_t ret;
@@ -24,6 +29,15 @@ ssize_t mfdf_prio_printf(int fd, int prio, const char *restrict format, ...)
         return ret;
 }
 
+
+/**
+ * Reading wrapper from multi-flow device file
+ *
+ * @fd:   file descriptor
+ * @prio: priority indicator (LOW_PRIO or HIGH_PRIO)
+ * @buff: buffer to store the read data
+ * @len:  number of bytes required to read
+ */
 ssize_t mfdf_prio_gets(int fd, int prio, char *buff, size_t len)
 {
         if(prio != KEEP_PRIO && mfdf_set_priority(fd, prio))

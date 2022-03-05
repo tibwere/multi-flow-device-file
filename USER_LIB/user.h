@@ -5,6 +5,16 @@
 #include <sys/ioctl.h>
 #include <mfdf/ioctl.h>
 
+/*
+ * For more details:
+ *      - install the user library with
+ *              # make install
+ *
+ *      - visit the manpage with:
+ *              $ man mfdf_user.h
+ */
+
+
 #define KEEP_PRIO (-1)
 #define MFDF_READ_ONLY (O_RDONLY)
 #define MFDF_WRITE_ONLY (O_WRONLY)

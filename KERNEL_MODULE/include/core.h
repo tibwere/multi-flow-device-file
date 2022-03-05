@@ -4,18 +4,18 @@
 #include <linux/kconfig.h> // for CONFIG_HZ constant
 
 /* "Constants" macros */
-#define MODNAME "MFDF:"          // Module name, useful for debug printk
-#define DEVICE_NAME "multi-flow" // Device name, useful for debug printk
+#define MODNAME "MFDF:"          // Module name, useful for printk
+#define DEVICE_NAME "multi-flow" // Device name, useful for printk
 #define MINORS (128)             // Number of minors available
 #define BUFSIZE (PAGE_SIZE)      // Size of buffer
 #define SYS_KOBJ_NAME "mfdf"     // Kernel object name (directory in /sys)
 
 
-/*
+/**
  * This structure represents the single stream (HIGH or LOW)
  * associated with the i-th device file (with 0 <= i <= 127).
- * It contains metadata such as the buffer, the offsets,
- * the mutex for the atomicity of the operations
+ * It contains metadata such as the buffer, the boundaries of
+ * valid area, the mutex for the atomicity of the operations
  * and some fields for the management of the deferred work
  */
 struct data_flow {
@@ -28,12 +28,17 @@ struct data_flow {
         atomic_t               pending_threads;
 };
 
+/**
+ * The space available for writing can be obtained by subtracting from the buffer size:
+ *      - the size of the valid buffer area,
+ *      - the number of pending bytes
+ */
 #define writable_bytes(flow) (BUFSIZE - (flow)->size_of_valid_area - (flow)->pending_bytes)
 
 
-/*
+/**
  * This structure represents the state of the i-th multi-flow device.
- * Inside, there is an array of two elements each of which represents
+ * Inside, there is an array of two elements, each of which represents
  * one of the available flows (HIGH and LOW) and a workqueue for
  * managing the deferred work in the low priority flow
  */
@@ -43,7 +48,7 @@ struct device_state {
 };
 
 
-/*
+/**
  * This structure contains all the metadata necessary for the management
  * of the deferred work
  */
@@ -57,7 +62,7 @@ struct work_metadata {
 };
 
 
-/*
+/**
  * This structure contains all the metadata necessary to manage the session.
  * These are represented by atomic fields to avoid the explicit use of a mutex.
  * In particular, to optimize the memory, the ": size" construct was used to ensure
@@ -72,24 +77,85 @@ struct session_metadata {
 
 #define DEFAULT_TOUT (0x29314)
 
-/*
- * Utility macros to "easily" access the fields of the session_metadata struct
- * starting from the private_data field of the struct file
+
+/**
+ * Macro used to retrieve the address of the field <field> starting
+ * from the pointer to a struct file
  */
-#define __session_metadata_addr(filp, field) &(((struct session_metadata *)filp->private_data)->field)
-#define get_active_flow(filp) &(devs[get_minor(filp)].flows[atomic_read(__session_metadata_addr(filp, idx))])
-#define set_active_flow(filp, new) atomic_set(__session_metadata_addr(filp, idx), new)
-#define is_high_active(filp) (atomic_read(__session_metadata_addr(filp, idx)) == HIGH_PRIO)
-#define is_block_read(filp) (((struct session_metadata *)filp->private_data)->READ_MODALITY == BLOCK)
-#define is_block_write(filp) (((struct session_metadata *)filp->private_data)->WRITE_MODALITY == BLOCK)
-#define set_read_modality(filp, new) ((struct session_metadata *)filp->private_data)->READ_MODALITY = new
-#define set_write_modality(filp, new) ((struct session_metadata *)filp->private_data)->WRITE_MODALITY = new
-#define get_timeout(filp) atomic_long_read(__session_metadata_addr(filp, timeout)) * CONFIG_HZ
-#define set_timeout(filp, new) atomic_long_set(__session_metadata_addr(filp,timeout), new)
-#define init_modality(filp) \
-        do { \
-                ((struct session_metadata *)filp->private_data)->READ_MODALITY = 0x0; \
-                ((struct session_metadata *)filp->private_data)->WRITE_MODALITY = 0x0; \
-        } while(0)
+#define session_metadata_field_addr(filp, field) \
+        &(((struct session_metadata *)(filp)->private_data)->field)
+
+
+/**
+ * Macro used to retrieve the value of the field <field> starting
+ * from the pointer to a struct file
+ */
+#define session_metadata_field_value(filp, field) \
+        (((struct session_metadata *)(filp)->private_data)->field)
+
+
+/**
+ * Gets the address of the currently active stream
+ * by atomically reading the index <idx>
+ */
+#define get_active_flow(filp) \
+        &(devs[get_minor(filp)].flows[atomic_read(session_metadata_field_addr((filp), idx))])
+
+
+/**
+ * Sets the index (HIGH_PRIO or LOW_PRIO) of the currently active stream
+ */
+#define set_active_flow(filp, new_idx) \
+        atomic_set(session_metadata_field_addr((filp), idx), (new_idx))
+
+
+/**
+ * Check if the high priority stream is currently active
+ */
+#define is_high_active(filp) \
+        (atomic_read(session_metadata_field_addr((filp), idx)) == HIGH_PRIO)
+
+
+/**
+ * Check if the reading is currently blocking
+ */
+#define is_block_read(filp) \
+        (session_metadata_field_value((filp),READ_MODALITY) == BLOCK)
+
+
+/**
+ * Check if the writing is currently blocking
+ */
+#define is_block_write(filp) \
+        (session_metadata_field_value((filp),WRITE_MODALITY) == BLOCK)
+
+
+/**
+ * Set the writing mode (BLOCK vs NON_BLOCK)
+ */
+#define set_read_modality(filp, new_mod) \
+        session_metadata_field_value((filp), READ_MODALITY) = (new_mod)
+
+
+/**
+ * Set the writing mode (BLOCK vs NON_BLOCK)
+ */
+#define set_write_modality(filp, new_mod) \
+        session_metadata_field_value((filp),WRITE_MODALITY) = (new_mod)
+
+
+/**
+ * Gets the currently set value of the timeout
+ */
+#define get_timeout(filp) \
+        atomic_long_read(session_metadata_field_addr((filp), timeout)) * CONFIG_HZ
+
+
+/**
+ * Sets the value of the timeout
+ */
+#define set_timeout(filp, new_val) \
+        atomic_long_set(session_metadata_field_addr((filp),timeout), (new_val))
+
 
 #endif // !__H_CORE__

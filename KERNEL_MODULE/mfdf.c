@@ -250,7 +250,8 @@ static int mfdf_open(struct inode *inode, struct file *filp)
 
         // Default active flow is the low priority one
         set_active_flow(filp, LOW_PRIO);
-        init_modality(filp);
+        session_metadata_field_value(filp, READ_MODALITY) = 0x0;
+        session_metadata_field_value(filp, WRITE_MODALITY) = 0x0;
         set_timeout(filp, DEFAULT_TOUT);
 
         return 0;
@@ -568,15 +569,6 @@ static struct attribute_group attr_group = {
 
 
 /**
- * Macros to summarize the initialization of wait queues
- */
-#define init_waitqueues(idx) \
-        do { \
-                init_waitqueue_head(&(devs[idx].flows[LOW_PRIO].pending_requests)); \
-                init_waitqueue_head(&(devs[idx].flows[HIGH_PRIO].pending_requests)); \
-        } while(0)
-
-/**
  * Array initialization of struct device_state devs
  */
 static int init_devices(void) {
@@ -599,9 +591,8 @@ static int init_devices(void) {
                         break;
                 }
 
-                init_waitqueues(i);
-
-                /* N.B. other fields initialization is not necessary due to previout memset */
+                init_waitqueue_head(&(devs[i].flows[LOW_PRIO].pending_requests));
+                init_waitqueue_head(&(devs[i].flows[HIGH_PRIO].pending_requests));
 
                 memset(wq_name, 0x0, 64);
                 snprintf(wq_name, 64, "mfdf-wq-%d-%d", major, i);
@@ -616,6 +607,8 @@ static int init_devices(void) {
                         free_page((unsigned long)devs[i].flows[HIGH_PRIO].buffer);
                         break;
                 }
+
+                /* N.B. other fields initialization is not necessary due to previout memset */
         }
 
         if (likely(i == MINORS))
