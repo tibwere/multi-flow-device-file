@@ -8,6 +8,12 @@
 
 #include "common.h"
 
+
+#define GREEN "\033[0;32m"
+#define RESET "\033[0m"
+#define RED "\033[0;31m"
+#define YELLOW "\033[0;33m"
+
 #define TEST_DEV "/dev/test-mfdf"
 #define STANDING_BYTES_SYS "/sys/kernel/mfdf/standing_bytes"
 #define STANDING_THREADS_SYS "/sys/kernel/mfdf/standing_threads"
@@ -304,13 +310,13 @@ void do_test(int major, int minor)
 
         switch(ret) {
                 case -1:
-                        snprintf(outcome, OUTCOME_LEN, "ERROR (errcode: %d)", errno);
+                        snprintf(outcome, OUTCOME_LEN, YELLOW "ERROR (errcode: %d)" RESET, errno);
                         break;
                 case 0:
-                        snprintf(outcome, OUTCOME_LEN, "FAIL");
+                        snprintf(outcome, OUTCOME_LEN, RED "FAIL" RESET);
                         break;
                 case 1:
-                        snprintf(outcome, OUTCOME_LEN, "SUCCESS");
+                        snprintf(outcome, OUTCOME_LEN, GREEN "SUCCESS" RESET);
                         break;
         }
 
