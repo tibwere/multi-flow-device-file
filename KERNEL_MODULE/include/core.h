@@ -70,7 +70,7 @@ struct session_metadata {
         volatile unsigned char WRITE_MODALITY : 1;
 };
 
-#define DEFAULT_TOUT ((long)(~0UL >> 1))
+#define DEFAULT_TOUT (0x29314)
 
 /*
  * Utility macros to "easily" access the fields of the session_metadata struct
