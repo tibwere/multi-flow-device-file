@@ -8,35 +8,31 @@
 #include "include/core.h"
 
 
-/* Module informations */
-MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Simone Tiberi <simone.tiberi.98@gmail.com>");
-MODULE_DESCRIPTION("Multi flow device file");
-
-/* Global variables/parameters */
-int major;                                      /* Major number associated with the device */
+/* Major number associated with the device */
+int major;
 module_param(major, int, 0440);
 
-int enable[MINORS] = {[0 ... (MINORS-1)] = 1};  /* Flag to enable the granularity of the minor number */
+/* Flag to enable the granularity of the minor number */
+int enable[MINORS] = {[0 ... (MINORS-1)] = 1};
 module_param_array(enable, int, NULL, 0660);
 
-static struct device_state devs[MINORS];        /* Array of struct device_state to keep track of the state of devices */
-static struct kobject *mfdf_sys_kobj;           /* Oggetto in sys per la gestione dei parametri read-only */
+/* Array of struct device_state to keep track of the state of devices */
+static struct device_state devs[MINORS];
 
 
 /* MIN utility macro */
 #define MIN(a,b) (((a)<(b))?(a):(b))
 
-/*
+/**
  * Retrieve major and minor number from the session according to
  * the version of linux in use
  */
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)
-#define get_major(session)      MAJOR(session->f_inode->i_rdev)
-#define get_minor(session)      MINOR(session->f_inode->i_rdev)
+        #define get_major(session)      MAJOR(session->f_inode->i_rdev)
+        #define get_minor(session)      MINOR(session->f_inode->i_rdev)
 #else
-#define get_major(session)      MAJOR(session->f_dentry->d_inode->i_rdev)
-#define get_minor(session)      MINOR(session->f_dentry->d_inode->i_rdev)
+        #define get_major(session)      MAJOR(session->f_dentry->d_inode->i_rdev)
+        #define get_minor(session)      MINOR(session->f_dentry->d_inode->i_rdev)
 #endif
 
 
@@ -47,12 +43,11 @@ static struct kobject *mfdf_sys_kobj;           /* Oggetto in sys per la gestion
  * The lock is released only if the check fails.
  *
  * THIS FUNCTION IS PRACTICALLY IDENTICAL TO THE OTHER ONE
- * BUT TO MAKE THE EXECUTION AS EFFICIENT AS POSSIBLE,
- * IT WAS PREFERRED TO REPLY INSTEAD OF USING A CONSTRUCT
- * IF NOT EASILY PREDICTABLE EVERY TIME
+ * (is_it_possible_to_read) BUT TO MAKE THE EXECUTION AS
+ * EFFICIENT AS POSSIBLE, IT WAS PREFERRED TO REPLY CODE
+ * INSTEAD OF USING AN IF NOT EASILY PREDICTABLE EVERY TIME.
  *
  * @flow: current flow
- * @type: 0 for read, 1 for write
  */
 static int __always_inline is_it_possible_to_write(struct data_flow *flow)
 {
@@ -68,17 +63,16 @@ static int __always_inline is_it_possible_to_write(struct data_flow *flow)
 
 /**
  * Function invoked by wait_event_interruptible_timeout
- * to check space availability.
+ * to check data availability.
  *
  * The lock is released only if the check fails.
  *
  * THIS FUNCTION IS PRACTICALLY IDENTICAL TO THE OTHER ONE
- * BUT TO MAKE THE EXECUTION AS EFFICIENT AS POSSIBLE,
- * IT WAS PREFERRED TO REPLY INSTEAD OF USING A CONSTRUCT
- * IF NOT EASILY PREDICTABLE EVERY TIME
+ * (is_it_possible_to_write) BUT TO MAKE THE EXECUTION AS
+ * EFFICIENT AS POSSIBLE, IT WAS PREFERRED TO REPLY CODE
+ * INSTEAD OF USING AN IF NOT EASILY PREDICTABLE EVERY TIME.
  *
  * @flow: current flow
- * @type: 0 for read, 1 for write
  */
 static int __always_inline is_it_possible_to_read(struct data_flow *flow)
 {
@@ -91,7 +85,7 @@ static int __always_inline is_it_possible_to_read(struct data_flow *flow)
         return 1;
 }
 
-
+/* Format of each line within the files in /sys/kernel/mfdf */
 #define SYS_FMT_LINE "%3d %4d %4d\n"
 
 /**
@@ -148,7 +142,7 @@ static ssize_t st_show(struct kobject *kobj, struct kobj_attribute *attr, char *
 
 
 /**
- * Makes it impossible to read read only parameters
+ * Makes it impossible to read read-only parameters
  * exposed via pseudofile in /sys/kernel/mfdf
  */
 static ssize_t forbidden_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
@@ -548,6 +542,9 @@ static struct file_operations fops = {
 };
 
 
+/* Object in sys for handling read-only parameters */
+static struct kobject *mfdf_sys_kobj;
+
 /* Attribute for standing bytes */
 static struct kobj_attribute sb_attr = __ATTR(standing_bytes, 0440, sb_show, forbidden_store);
 
@@ -679,6 +676,9 @@ static void __exit mfdf_cleanup(void)
         pr_info("%s multi flow device file unregistered (MAJOR number: %d)\n", MODNAME, major);
 }
 
-
+/* Things related to module management */
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Simone Tiberi <simone.tiberi.98@gmail.com>");
+MODULE_DESCRIPTION("Multi flow device file");
 module_init(mfdf_initialize);
 module_exit(mfdf_cleanup);
