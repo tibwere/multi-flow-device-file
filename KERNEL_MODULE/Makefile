@@ -1,4 +1,5 @@
 obj-m += mfdf.o
+CFLAGS_mfdf.o := -DDEBUG
 
 PREFIX  = /usr/local
 MODNAME = mfdf
