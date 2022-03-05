@@ -19,7 +19,7 @@
 #define ROW_LEN 81
 #define STANDING_ROW_LEN 14
 #define WAIT_TIME 3
-#define SHOW_RESULTS
+// #define SHOW_RESULTS
 
 struct test_case {
         const char *name;
