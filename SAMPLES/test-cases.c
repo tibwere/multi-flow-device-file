@@ -1,16 +1,14 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/sysmacros.h>
-#include <sys/stat.h>
 #include <errno.h>
 #include <unistd.h>
 #include <string.h>
 #include <pthread.h>
 #include <mfdf/user.h>
 
+#include "common.h"
 
 #define TEST_DEV "/dev/test-mfdf"
-#define MAJOR_SYS "/sys/module/mfdf/parameters/major"
 #define STANDING_BYTES_SYS "/sys/kernel/mfdf/standing_bytes"
 #define STANDING_THREADS_SYS "/sys/kernel/mfdf/standing_threads"
 #define TABLE_ROW "%2d) [M: %3d, m: %2d]      %-40s %-20s\n"
@@ -290,39 +288,13 @@ static struct test_case test_cases[] = {
  ********************************************************************/
 
 
-int get_major_number(void)
-{
-        int fd;
-        char buff[16];
-
-        if((fd = open(MAJOR_SYS, O_RDONLY)) == -1)
-                return -1;
-
-        if(read(fd, buff, 16) == -1)
-                return -1;
-
-        close(fd);
-
-        return strtol(buff, NULL, 10);
-}
-
-
-int init_test_environment(int major, int minor)
-{
-        if(mknod(TEST_DEV, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH | S_IFCHR, makedev(major, minor)))
-                return -1;
-
-        return mfdf_open(TEST_DEV, MFDF_READ_WRITE);
-}
-
-
 void do_test(int major, int minor)
 {
         int ret, fd;
         char outcome[OUTCOME_LEN];
         struct test_case *the_test_case = &(test_cases[minor]);
 
-        if((fd = init_test_environment(major, minor)) == -1) {
+        if((fd = init_test_environment(TEST_DEV, major, minor)) == -1) {
                 fprintf(stderr, "Environment setup failed (M: %d, m: %d, err: %d)\n", major, minor, errno);
                 return;
         }
