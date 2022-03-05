@@ -211,7 +211,7 @@ static int  __do_effective_write(struct data_flow *flow, const char *buff, size_
 static void write_on_buffer(unsigned long data)
 {
         struct work_metadata *the_task = (struct work_metadata *)container_of((void*)data,struct work_metadata,the_work);
-        pr_info("%s kworker %d handle a write operation on the low priority flow of %s device [MAJOR: %d, minor: %d]",
+        pr_debug("%s kworker %d handle a write operation on the low priority flow of %s device [MAJOR: %d, minor: %d]",
                MODNAME, current->pid, DEVICE_NAME, the_task->major, the_task->minor);
 
         mutex_lock(&(the_task->active_flow->mu));
@@ -236,7 +236,7 @@ static int mfdf_open(struct inode *inode, struct file *filp)
 {
         int minor;
         struct device_state *the_device;
-        pr_info("%s thread %d has called an open on %s device [MAJOR: %d, minor: %d]",
+        pr_debug("%s thread %d has called an open on %s device [MAJOR: %d, minor: %d]",
                MODNAME, current->pid, DEVICE_NAME, get_major(filp), get_minor(filp));
 
         minor = get_minor(filp);
@@ -266,7 +266,7 @@ static int mfdf_open(struct inode *inode, struct file *filp)
  */
 static int mfdf_release(struct inode *inode, struct file *filp)
 {
-        pr_info("%s thread %d has called a release on %s device [MAJOR: %d, minor: %d]",
+        pr_debug("%s thread %d has called a release on %s device [MAJOR: %d, minor: %d]",
                MODNAME, current->pid, DEVICE_NAME, get_major(filp), get_minor(filp));
 
         kfree(filp->private_data);
@@ -326,7 +326,7 @@ static ssize_t mfdf_write(struct file *filp, const char __user *buff, size_t len
         struct device_state *the_device;
         struct data_flow *active_flow;
 
-        pr_info("%s thread %d has called a write on %s device [MAJOR: %d, minor: %d]",
+        pr_debug("%s thread %d has called a write on %s device [MAJOR: %d, minor: %d]",
                MODNAME, current->pid, DEVICE_NAME, get_major(filp), get_minor(filp));
 
         the_device = devs + get_minor(filp);
@@ -429,7 +429,7 @@ static ssize_t mfdf_read(struct file *filp, char __user *buff, size_t len, loff_
         struct device_state *the_device;
         struct data_flow *active_flow;
 
-        pr_info("%s thread %d has called a read on %s device [MAJOR: %d, minor: %d]",
+        pr_debug("%s thread %d has called a read on %s device [MAJOR: %d, minor: %d]",
                MODNAME, current->pid, DEVICE_NAME ,get_major(filp), get_minor(filp));
 
         the_device = devs + get_minor(filp);
@@ -496,7 +496,7 @@ static long mfdf_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
                         if (arg != HIGH_PRIO && arg != LOW_PRIO)
                                 return -EINVAL;
 
-                        pr_info("%s thread %d used an ioctl on %s device [MAJOR: %d, minor: %d] to change priority to %s",
+                        pr_debug("%s thread %d used an ioctl on %s device [MAJOR: %d, minor: %d] to change priority to %s",
                                MODNAME, current->pid, DEVICE_NAME ,get_major(filp), get_minor(filp), (arg == HIGH_PRIO) ? "HIGH" : "LOW");
 
                         set_active_flow(filp, arg);
@@ -505,7 +505,7 @@ static long mfdf_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
                         if (arg != BLOCK && arg != NON_BLOCK)
                                 return -EINVAL;
 
-                        pr_info("%s thread %d used an ioctl on %s device [MAJOR: %d, minor: %d] to change read modality to %s",
+                        pr_debug("%s thread %d used an ioctl on %s device [MAJOR: %d, minor: %d] to change read modality to %s",
                                MODNAME, current->pid, DEVICE_NAME ,get_major(filp), get_minor(filp), (arg == BLOCK) ? "BLOCK" : "NON-BLOCK");
 
                         set_read_modality(filp, arg);
@@ -514,13 +514,13 @@ static long mfdf_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
                         if (arg != BLOCK && arg != NON_BLOCK)
                                 return -EINVAL;
 
-                        pr_info("%s thread %d used an ioctl on %s device [MAJOR: %d, minor: %d] to change write modality to %s",
+                        pr_debug("%s thread %d used an ioctl on %s device [MAJOR: %d, minor: %d] to change write modality to %s",
                                MODNAME, current->pid, DEVICE_NAME ,get_major(filp), get_minor(filp), (arg == BLOCK) ? "BLOCK" : "NON-BLOCK");
 
                         set_write_modality(filp, arg);
                         return 0;
                 case MFDF_IOCTL_SET_TOUT:
-                        pr_info("%s thread %d used an ioctl on %s device [MAJOR: %d, minor: %d] to set timeout for blocking operations to %ld",
+                        pr_debug("%s thread %d used an ioctl on %s device [MAJOR: %d, minor: %d] to set timeout for blocking operations to %ld",
                                MODNAME, current->pid, DEVICE_NAME ,get_major(filp), get_minor(filp), arg);
 
                         set_timeout(filp, arg);
@@ -634,7 +634,7 @@ static int __init mfdf_initialize(void)
 {
         major = __register_chrdev(0, 0, MINORS, DEVICE_NAME, &fops);
         if (major < 0) {
-                pr_info("%s registering multi-flow device file failed\n", MODNAME);
+                pr_debug("%s registering multi-flow device file failed\n", MODNAME);
                 return major;
         }
 
@@ -650,7 +650,7 @@ static int __init mfdf_initialize(void)
 	if(sysfs_create_group(mfdf_sys_kobj, &attr_group))
 		kobject_put(mfdf_sys_kobj);
 
-        pr_info("%s multi flow device file registered (MAJOR number: %d)\n", MODNAME, major);
+        pr_debug("%s multi flow device file registered (MAJOR number: %d)\n", MODNAME, major);
         return 0;
 }
 
@@ -669,7 +669,7 @@ static void __exit mfdf_cleanup(void)
 
         unregister_chrdev(major, DEVICE_NAME);
         kobject_put(mfdf_sys_kobj);
-        pr_info("%s multi flow device file unregistered (MAJOR number: %d)\n", MODNAME, major);
+        pr_debug("%s multi flow device file unregistered (MAJOR number: %d)\n", MODNAME, major);
 }
 
 /* Things related to module management */
