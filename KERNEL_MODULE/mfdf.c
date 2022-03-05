@@ -287,10 +287,12 @@ static int mfdf_release(struct inode *inode, struct file *filp)
 static int  __deferred_write(struct data_flow *flow, struct workqueue_struct *queue, struct file *filp, const char __user *buff, size_t len)
 {
         int residual;
+        size_t effective_length;
         struct work_metadata *the_task;
 
         if(!try_module_get(THIS_MODULE))
                 return -ENODEV;
+
 
         the_task = (struct work_metadata *)kzalloc(sizeof(struct work_metadata), GFP_KERNEL);
         if(unlikely(the_task == NULL))
@@ -299,13 +301,14 @@ static int  __deferred_write(struct data_flow *flow, struct workqueue_struct *qu
         the_task->major = get_major(filp);
         the_task->minor = get_minor(filp);
         the_task->active_flow = flow;
-        the_task->len = len;
         residual = copy_from_user(the_task->buff, buff, len);
+        effective_length = MIN(writable_bytes(flow), (len-residual));
+        the_task->len = effective_length;
 
         __INIT_WORK(&(the_task->the_work),(void*)write_on_buffer,(unsigned long)(&(the_task->the_work)));
         queue_work(queue, &the_task->the_work);
 
-        return MIN(writable_bytes(flow), (len - residual));
+        return effective_length;
 }
 
 
