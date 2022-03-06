@@ -27,7 +27,7 @@ int main()
                 return 1;
         }
 
-        if ((ret = mfdf_gets(fd, buff, 4096)) == -1) {
+        if ((ret = mfdf_read(fd, buff, 4096)) == -1) {
                 fprintf(stderr, "Read error (errcode: %d)\n", errno);
                 return 1;
         }
