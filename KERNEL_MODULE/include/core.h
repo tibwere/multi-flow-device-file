@@ -19,21 +19,15 @@
  * and some fields for the management of the deferred work
  */
 struct data_flow {
-        struct mutex           mu;
-        struct wait_queue_head pending_requests;
-        char                   *buffer;
-        int                    start_valid_area;
-        int                    size_of_valid_area;
-        int                    pending_bytes;
-        atomic_t               pending_threads;
+        int                     prio_level;
+        struct mutex            mu;
+        struct wait_queue_head  pending_requests;
+        char                    *buffer;
+        int                     start_valid_area;
+        int                     size_of_valid_area;
+        int                     pending_bytes;
+        atomic_t                pending_threads;
 };
-
-/**
- * The space available for writing can be obtained by subtracting from the buffer size:
- *      - the size of the valid buffer area,
- *      - the number of pending bytes
- */
-#define writable_bytes(flow) (BUFSIZE - (flow)->size_of_valid_area - (flow)->pending_bytes)
 
 
 /**
@@ -106,13 +100,6 @@ struct session_metadata {
  */
 #define set_active_flow(filp, new_idx) \
         atomic_set(session_metadata_field_addr((filp), idx), (new_idx))
-
-
-/**
- * Check if the high priority stream is currently active
- */
-#define is_high_active(filp) \
-        (atomic_read(session_metadata_field_addr((filp), idx)) == HIGH_PRIO)
 
 
 /**
