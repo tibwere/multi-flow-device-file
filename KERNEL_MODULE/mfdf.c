@@ -32,6 +32,13 @@ static struct device_state devs[MINORS];
 #endif
 
 
+/**
+ * Function responsible for evaluating the space available
+ * for writing by discriminating whether the HIGH or LOW
+ * stream is active
+ *
+ * @flow: current flow
+ */
 static int __always_inline writable_bytes(struct data_flow *flow)
 {
         if (flow->prio_level == HIGH_PRIO)
@@ -476,6 +483,7 @@ static ssize_t mfdf_read(struct file *filp, char __user *buff, size_t len, loff_
                 }
         }
 
+        len = MIN(len, active_flow->size_of_valid_area);
         retval = __do_effective_read(active_flow, buff, len);
 
         mutex_unlock(&(active_flow->mu));
