@@ -10,12 +10,8 @@
 
 /* Major number associated with the device */
 int major;
-module_param(major, int, 0440);
-
 /* Flag to enable the granularity of the minor number */
 int enable[MINORS] = {[0 ... (MINORS-1)] = 1};
-module_param_array(enable, int, NULL, 0660);
-
 /* Array of struct device_state to keep track of the state of devices */
 static struct device_state devs[MINORS];
 
@@ -572,6 +568,15 @@ static struct attribute_group attr_group = {
 
 
 /**
+ * Operations for major param (WRITE IS FORBIDDEN)
+ */
+static struct kernel_param_ops major_ops = {
+	.get	= &param_get_int,
+	.set	= NULL,
+};
+
+
+/**
  * Array initialization of struct device_state devs
  */
 static int init_devices(void) {
@@ -673,8 +678,12 @@ static void __exit mfdf_cleanup(void)
 }
 
 /* Things related to module management */
+module_param_cb(major, &major_ops, &major, 0440);
+module_param_array(enable, int, NULL, 0660);
+
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Simone Tiberi <simone.tiberi.98@gmail.com>");
 MODULE_DESCRIPTION("Multi flow device file");
+
 module_init(mfdf_initialize);
 module_exit(mfdf_cleanup);
