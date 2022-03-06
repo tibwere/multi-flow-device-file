@@ -44,7 +44,8 @@ void *read_worker(void *argptr)
         char buff[16];
 
         targs = (struct thread_args *)argptr;
-        mfdf_prio_gets(targs->fd, targs->prio, buff, 16);
+        mfdf_set_priority(targs->fd, targs->prio);
+        mfdf_read(targs->fd, buff, 16);
         free(targs);
         return NULL;
 }
@@ -65,7 +66,6 @@ int test_immutable_major_from_sys(__attribute__ ((unused)) int fd, __attribute__
 
         if((sys_fd = open(MAJOR_SYS, O_WRONLY)) == -1)
                 return -1;
-
 
         ret = write(sys_fd, "1", 1);
 
@@ -89,40 +89,38 @@ int test_subsequent_low_writes(int fd, __attribute__ ((unused)) int minor)
         for (i=0; i<10; ++i) {
                 memset(temp_buff, 0x0, 16);
                 snprintf(temp_buff, 16, "Message %d", i);
-                mfdf_printf(fd, temp_buff, strlen(temp_buff));
+                mfdf_write(fd, temp_buff, strlen(temp_buff));
                 strcat(expected_buff, temp_buff);
         }
 
         sleep(WAIT_TIME);
 
         memset(buff, 0x0, 4096);
-        mfdf_gets(fd, buff, 4096);
+        mfdf_read(fd, buff, 4096);
 
         return strcmp(expected_buff, buff) == 0;
 }
 
 
-int test_standing_threads(int fd, int minor)
+int __test_standing_threads(int fd, int minor, int prio)
 {
-        int i, j, sysfd, standing_high, standing_low, ret;
-        pthread_t ids[10];
+        int i, sysfd, standing, ret;
+        pthread_t ids[5];
         struct thread_args *args;
         char buff[128];
 
         memset(buff, 0x41, 128); // buff = "AA[...]AA"
 
         for(i=0; i<5; ++i) {
-                for(j=0; j<2; ++j) {
-                        if((args = malloc(sizeof(struct thread_args))) == NULL)
-                                return -1;
+                if((args = malloc(sizeof(struct thread_args))) == NULL)
+                        return -1;
 
-                        args->fd = fd;
-                        args->prio = j;
+                args->fd = fd;
+                args->prio = prio;
 
-                        if((ret = pthread_create(&(ids[2*i + j]), NULL, read_worker, (void *)args) > 0) > 0) {
-                                errno = ret; // See manpage "Return value" section
-                                return -1;
-                        }
+                if((ret = pthread_create(&(ids[i]), NULL, read_worker, (void *)args) > 0) > 0) {
+                        errno = ret; // See manpage "Return value" section
+                        return -1;
                 }
         }
 
@@ -138,16 +136,16 @@ int test_standing_threads(int fd, int minor)
                 return -1;
 
         /* n.b. File format "%3d %4d %4d\n" */
-        standing_low = strtol(buff + 3, NULL, 10);
-        standing_high = strtol(buff + 8, NULL, 10);
+        if (prio == LOW_PRIO)
+                standing = strtol(buff + 3, NULL, 10);
+        else
+                standing = strtol(buff + 8, NULL, 10);
 
         // Unlock threads
-        mfdf_set_priority(fd, LOW_PRIO);
-        write(fd, buff, 80);
-        mfdf_set_priority(fd, HIGH_PRIO);
-        write(fd, buff, 80);
+        mfdf_set_priority(fd, prio);
+        mfdf_write(fd, buff, 80);
 
-        for(i=0; i<10; ++i){
+        for(i=0; i<5; ++i){
                 if((ret = pthread_join(ids[i], NULL)) > 0) {
                         errno = ret;
                         return -1;
@@ -157,20 +155,32 @@ int test_standing_threads(int fd, int minor)
         close(sysfd);
 
 #ifdef SHOW_RESULTS
-        printf("STANDING LOW  [expected: 5 -> actual: %d]\n", standing_low);
-        printf("STANDING HIGH [expected: 5 -> actual: %d]\n", standing_high);
+        printf("STANDING [expected: 5 -> actual: %d]\n", standing);
 #endif
 
-        return (standing_low == 5 && standing_high == 5);
+        return (standing == 5);
 }
 
-int test_standing_bytes(int fd, int minor)
+
+int test_standing_threads_low(int fd, int minor)
 {
-        int sysfd, lret, hret, standing_high, standing_low;
+        return __test_standing_threads(fd, minor, LOW_PRIO);
+}
+
+
+int test_standing_threads_high(int fd, int minor)
+{
+        return __test_standing_threads(fd, minor, HIGH_PRIO);
+}
+
+
+int __test_standing_bytes(int fd, int minor, int prio)
+{
+        int sysfd, ret, standing;
         char buff[16];
 
-        lret = mfdf_printf_low(fd, "MESSAGE");
-        hret = mfdf_printf_high(fd, "MESSAGE");
+        mfdf_set_priority(fd, prio);
+        ret = mfdf_printf(fd, "MESSAGE");
 
         if((sysfd = open(STANDING_BYTES_SYS, O_RDONLY)) == -1)
                 return -1;
@@ -182,32 +192,45 @@ int test_standing_bytes(int fd, int minor)
                 return -1;
 
         /* n.b. File format "%3d %4d %4d\n" */
-        standing_low = strtol(buff + 3, NULL, 10);
-        standing_high = strtol(buff + 8, NULL, 10);
+        if (prio == LOW_PRIO)
+                standing = strtol(buff + 3, NULL, 10);
+        else
+                standing = strtol(buff + 8, NULL, 10);
 
-        // Cleanup buffer
-        mfdf_gets_low(fd, buff, 16);
-        mfdf_gets_high(fd, buff, 16);
-
+        // Cleanup
+        mfdf_read(fd, buff, 16);
         close(sysfd);
 
 #ifdef SHOW_RESULTS
-        printf("STANDING LOW   [expected: 7 (strlen(\"MESSAGE\") = %d) -> actual: %d]\n", lret, standing_low);
-        printf("STANDING HIGH  [expected: 7 (strlen(\"MESSAGE\") = %d) -> actual: %d]\n", hret, standing_high);
+        printf("STANDING [expected: 7 (strlen(\"MESSAGE\") = %d) -> actual: %d]\n", ret, standing);
 #endif
 
-        return (lret == standing_low && hret == standing_high);
+        return (ret == standing);
 }
 
-int test_write_less_read_more_low(int fd, __attribute__ ((unused)) int minor)
+
+int test_standing_bytes_low(int fd, int minor)
+{
+        return __test_standing_bytes(fd, minor, LOW_PRIO);
+}
+
+
+int test_standing_bytes_high(int fd, int minor)
+{
+        return __test_standing_bytes(fd, minor, HIGH_PRIO);
+}
+
+
+int __test_write_less_read_more(int fd, int prio)
 {
         int wret, rret;
         char buff[128];
 
         memset(buff, 0x0, 128);
 
-        wret = mfdf_printf_low(fd, "MESSAGE");
-        rret = mfdf_gets_low(fd, buff, 128);
+        mfdf_set_priority(fd, prio);
+        wret = mfdf_printf(fd, "MESSAGE");
+        rret = mfdf_read(fd, buff, 128);
 
 
 #ifdef SHOW_RESULTS
@@ -217,41 +240,34 @@ int test_write_less_read_more_low(int fd, __attribute__ ((unused)) int minor)
 #endif
 
         return (wret == strlen("MESSAGE") && rret == strlen("MESSAGE") && strcmp(buff, "MESSAGE") == 0);
+}
+
+
+int test_write_less_read_more_low(int fd, __attribute__ ((unused)) int minor)
+{
+        return __test_write_less_read_more(fd, LOW_PRIO);
 }
 
 
 int test_write_less_read_more_high(int fd, __attribute__ ((unused)) int minor)
 {
-        int wret, rret;
-        char buff[128];
-
-        memset(buff, 0x0, 128);
-
-        wret = mfdf_printf_high(fd, "MESSAGE");
-        rret = mfdf_gets_high(fd, buff, 128);
-
-#ifdef SHOW_RESULTS
-        printf("WRITTEN BYTES   [expected: 7 (strlen(\"MESSAGE\") = %ld) -> actual: %d]\n", strlen("MESSAGE"), wret);
-        printf("READ BYTES      [expected: 7 (strlen(\"MESSAGE\") = %ld) -> actual: %d]\n", strlen("MESSAGE"), rret);
-        printf("COMPARE STRINGS [expected: 0 (EQUALS) -> actual: %d]\n", strcmp(buff, "MESSAGE"));
-#endif
-
-        return (wret == strlen("MESSAGE") && rret == strlen("MESSAGE") && strcmp(buff, "MESSAGE") == 0);
+        return __test_write_less_read_more(fd, HIGH_PRIO);
 }
 
 
-int test_non_blocking_write_no_space(int fd, __attribute__ ((unused)) int minor)
+int __test_non_blocking_write_no_space(int fd, int prio)
 {
         int first_ret, second_ret;
         char buff[4096];
 
         memset(buff, 0x41, 4096); // buff = "AA[...]AA"
 
+        mfdf_set_priority(fd, prio);
         mfdf_set_write_modality(fd, NON_BLOCK);
-        first_ret = write(fd, buff, 4096);
-        second_ret = write(fd, "This shouldn't be written to the device", strlen("This shouldn't be written to the device"));
+        first_ret = mfdf_write(fd, buff, 4096);
+        second_ret = mfdf_write(fd, "This shouldn't be written to the device", strlen("This shouldn't be written to the device"));
 
-        mfdf_gets_low(fd, buff, 4096);
+        mfdf_read(fd, buff, 4096);
 
 #ifdef SHOW_RESULTS
         printf("FIRST WRITE  [expected: 4096 -> actual: %d]\n", first_ret);
@@ -261,18 +277,31 @@ int test_non_blocking_write_no_space(int fd, __attribute__ ((unused)) int minor)
 }
 
 
-int test_blocking_write_no_space(int fd, __attribute__ ((unused)) int minor)
+int test_non_blocking_write_no_space_low(int fd, __attribute__ ((unused)) int minor)
+{
+        return __test_non_blocking_write_no_space(fd, LOW_PRIO);
+}
+
+
+int test_non_blocking_write_no_space_high(int fd, __attribute__ ((unused)) int minor)
+{
+        return __test_non_blocking_write_no_space(fd, HIGH_PRIO);
+}
+
+
+int __test_blocking_write_no_space(int fd, int prio)
 {
         int first_ret, second_ret;
         char buff[4096];
 
         memset(buff, 0x41, 4096); // buff = "AA[...]AA"
 
+        mfdf_set_priority(fd, prio);
         mfdf_set_timeout(fd, WAIT_TIME);
-        first_ret = write(fd, buff, 4096);
-        second_ret = write(fd, "This shouldn't be written to the device", strlen("This shouldn't be written to the device"));
+        first_ret = mfdf_write(fd, buff, 4096);
+        second_ret = mfdf_write(fd, "This shouldn't be written to the device", strlen("This shouldn't be written to the device"));
 
-        mfdf_gets_low(fd, buff, 4096);
+        mfdf_read(fd, buff, 4096);
 
 #ifdef SHOW_RESULTS
         printf("FIRST WRITE  [expected: 4096 -> actual: %d]\n", first_ret);
@@ -283,14 +312,26 @@ int test_blocking_write_no_space(int fd, __attribute__ ((unused)) int minor)
         return (first_ret == 4096 && second_ret == -1 && errno == ETIME);
 }
 
+int test_blocking_write_no_space_low(int fd, __attribute__ ((unused)) int minor)
+{
+        return __test_blocking_write_no_space(fd, LOW_PRIO);
+}
 
-int test_non_blocking_read_no_data(int fd, __attribute__ ((unused)) int minor)
+
+int test_blocking_write_no_space_high(int fd, __attribute__ ((unused)) int minor)
+{
+        return __test_blocking_write_no_space(fd, HIGH_PRIO);
+}
+
+
+int __test_non_blocking_read_no_data(int fd, int prio)
 {
         int ret;
         char buff[16];
 
+        mfdf_set_priority(fd, prio);
         mfdf_set_read_modality(fd, NON_BLOCK);
-        ret = mfdf_gets_low(fd, buff, 16);
+        ret = mfdf_read(fd, buff, 16);
 
 #ifdef SHOW_RESULTS
         printf("READ BYTES [expected: 0 -> actual: %d]\n", ret);
@@ -300,13 +341,26 @@ int test_non_blocking_read_no_data(int fd, __attribute__ ((unused)) int minor)
 }
 
 
-int test_blocking_read_no_data(int fd, __attribute__ ((unused)) int minor)
+int test_non_blocking_read_no_data_low(int fd, __attribute__ ((unused)) int minor)
+{
+        return __test_non_blocking_read_no_data(fd, LOW_PRIO);
+}
+
+
+int test_non_blocking_read_no_data_high(int fd, __attribute__ ((unused)) int minor)
+{
+        return __test_non_blocking_read_no_data(fd, HIGH_PRIO);
+}
+
+
+int __test_blocking_read_no_data(int fd, int prio)
 {
         int ret;
         char buff[16];
 
+        mfdf_set_priority(fd, prio);
         mfdf_set_timeout(fd, WAIT_TIME);
-        ret = mfdf_gets_low(fd, buff, 16);
+        ret = mfdf_read(fd, buff, 16);
 
 #ifdef SHOW_RESULTS
         printf("READ BYTES [expected: -> -1 actual: %d]\n", ret);
@@ -316,16 +370,35 @@ int test_blocking_read_no_data(int fd, __attribute__ ((unused)) int minor)
         return (ret == -1 && errno == ETIME);
 }
 
+
+int test_blocking_read_no_data_low(int fd, __attribute__ ((unused)) int minor)
+{
+        return __test_blocking_read_no_data(fd, LOW_PRIO);
+}
+
+
+int test_blocking_read_no_data_high(int fd, __attribute__ ((unused)) int minor)
+{
+        return __test_blocking_read_no_data(fd, HIGH_PRIO);
+}
+
+
 /* This array MUST be NULL terminated */
 static struct test_case test_cases[] = {
-        {"Blocking read with no input", test_blocking_read_no_data},
-        {"Non-blocking read with no input", test_non_blocking_read_no_data},
-        {"Blocking write with no space", test_blocking_write_no_space},
-        {"Non-blocking write with no space", test_non_blocking_write_no_space},
+        {"Blocking read with no data (LOW)", test_blocking_read_no_data_low},
+        {"Blocking read with no data (HIGH)", test_blocking_read_no_data_high},
+        {"Non-blocking read with no data (LOW)", test_non_blocking_read_no_data_low},
+        {"Non-blocking read with no data (HIGH)", test_non_blocking_read_no_data_high},
+        {"Blocking write with no space (LOW)", test_blocking_write_no_space_low},
+        {"Blocking write with no space (HIGH)", test_blocking_write_no_space_high},
+        {"Non-blocking write with no space (LOW)", test_non_blocking_write_no_space_low},
+        {"Non-blocking write with no space (HIGH)", test_non_blocking_write_no_space_high},
         {"Write less byte than read ones (LOW)", test_write_less_read_more_low},
         {"Write less byte than read ones (HIGH)", test_write_less_read_more_high},
-        {"Standing bytes", test_standing_bytes},
-        {"Standing threads", test_standing_threads},
+        {"Standing bytes (LOW)", test_standing_bytes_low},
+        {"Standing bytes (HIGH)", test_standing_bytes_high},
+        {"Standing threads (LOW)", test_standing_threads_low},
+        {"Standing threads (HIGH)", test_standing_threads_high},
         {"Subsequent writes on low priority", test_subsequent_low_writes},
         {"Immutable major from /sys pseudo file", test_immutable_major_from_sys},
         {NULL, NULL}
