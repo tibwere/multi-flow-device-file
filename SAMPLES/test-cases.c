@@ -2,6 +2,7 @@
 #include <mfdf/ioctl.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/stat.h>
 #include <errno.h>
 #include <unistd.h>
 #include <string.h>
@@ -53,6 +54,36 @@ void *read_worker(void *argptr)
 /********************************************************************
  ************************* START TEST CASES *************************
  ********************************************************************/
+int test_immutable_major_from_sys(__attribute__ ((unused)) int fd, __attribute__ ((unused)) int minor)
+{
+        int ret, sys_fd;
+        mode_t original_mode, new_mode;
+        original_mode = 0440;
+        new_mode = 0660;
+
+        if(chmod(MAJOR_SYS, new_mode) == -1) {
+                printf("Qui 1\n");
+                return -1;
+        }
+
+        if((sys_fd = open(MAJOR_SYS, O_WRONLY)) == -1) {
+                printf("Qui 2\n");
+                return -1;
+        }
+
+        ret = write(sys_fd, "1", 1);
+
+        close(sys_fd);
+
+        if(chmod(MAJOR_SYS, original_mode) == -1) {
+                printf("Qui 1\n");
+                return -1;
+        }
+
+        return (ret == -1 && errno == EIO);
+}
+
+
 int test_subsequent_low_writes(int fd, __attribute__ ((unused)) int minor)
 {
         int i;
@@ -129,7 +160,6 @@ int test_standing_threads(int fd, int minor)
                 }
         }
 
-        close(fd);
         close(sysfd);
 
 #ifdef SHOW_RESULTS
@@ -165,7 +195,6 @@ int test_standing_bytes(int fd, int minor)
         mfdf_gets_low(fd, buff, 16);
         mfdf_gets_high(fd, buff, 16);
 
-        close(fd);
         close(sysfd);
 
 #ifdef SHOW_RESULTS
@@ -186,7 +215,6 @@ int test_write_less_read_more_low(int fd, __attribute__ ((unused)) int minor)
         wret = mfdf_printf_low(fd, "MESSAGE");
         rret = mfdf_gets_low(fd, buff, 128);
 
-        mfdf_close(fd);
 
 #ifdef SHOW_RESULTS
         printf("WRITTEN BYTES   [expected: 7 (strlen(\"MESSAGE\") = %ld) -> actual: %d]\n", strlen("MESSAGE"), wret);
@@ -207,8 +235,6 @@ int test_write_less_read_more_high(int fd, __attribute__ ((unused)) int minor)
 
         wret = mfdf_printf_high(fd, "MESSAGE");
         rret = mfdf_gets_high(fd, buff, 128);
-
-        mfdf_close(fd);
 
 #ifdef SHOW_RESULTS
         printf("WRITTEN BYTES   [expected: 7 (strlen(\"MESSAGE\") = %ld) -> actual: %d]\n", strlen("MESSAGE"), wret);
@@ -232,7 +258,6 @@ int test_non_blocking_write_no_space(int fd, __attribute__ ((unused)) int minor)
         second_ret = write(fd, "This shouldn't be written to the device", strlen("This shouldn't be written to the device"));
 
         mfdf_gets_low(fd, buff, 4096);
-        mfdf_close(fd);
 
 #ifdef SHOW_RESULTS
         printf("FIRST WRITE  [expected: 4096 -> actual: %d]\n", first_ret);
@@ -254,7 +279,6 @@ int test_blocking_write_no_space(int fd, __attribute__ ((unused)) int minor)
         second_ret = write(fd, "This shouldn't be written to the device", strlen("This shouldn't be written to the device"));
 
         mfdf_gets_low(fd, buff, 4096);
-        mfdf_close(fd);
 
 #ifdef SHOW_RESULTS
         printf("FIRST WRITE  [expected: 4096 -> actual: %d]\n", first_ret);
@@ -273,7 +297,6 @@ int test_non_blocking_read_no_data(int fd, __attribute__ ((unused)) int minor)
 
         mfdf_set_read_modality(fd, NON_BLOCK);
         ret = mfdf_gets_low(fd, buff, 16);
-        mfdf_close(fd);
 
 #ifdef SHOW_RESULTS
         printf("READ BYTES [expected: 0 -> actual: %d]\n", ret);
@@ -290,7 +313,6 @@ int test_blocking_read_no_data(int fd, __attribute__ ((unused)) int minor)
 
         mfdf_set_timeout(fd, WAIT_TIME);
         ret = mfdf_gets_low(fd, buff, 16);
-        mfdf_close(fd);
 
 #ifdef SHOW_RESULTS
         printf("READ BYTES [expected: -> -1 actual: %d]\n", ret);
@@ -311,6 +333,7 @@ static struct test_case test_cases[] = {
         {"Standing bytes", test_standing_bytes},
         {"Standing threads", test_standing_threads},
         {"Subsequent writes on low priority", test_subsequent_low_writes},
+        {"Immutable major from /sys pseudo file", test_immutable_major_from_sys},
         {NULL, NULL}
 };
 /********************************************************************
@@ -330,6 +353,8 @@ void do_test(int major, int minor)
         }
 
         ret = (the_test_case->test_fn)(fd, minor);
+
+        mfdf_close(fd);
         unlink(TEST_DEV);
 
         switch(ret) {
