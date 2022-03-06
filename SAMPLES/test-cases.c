@@ -61,24 +61,19 @@ int test_immutable_major_from_sys(__attribute__ ((unused)) int fd, __attribute__
         original_mode = 0440;
         new_mode = 0660;
 
-        if(chmod(MAJOR_SYS, new_mode) == -1) {
-                printf("Qui 1\n");
+        if(chmod(MAJOR_SYS, new_mode) == -1)
                 return -1;
-        }
 
-        if((sys_fd = open(MAJOR_SYS, O_WRONLY)) == -1) {
-                printf("Qui 2\n");
+        if((sys_fd = open(MAJOR_SYS, O_WRONLY)) == -1)
                 return -1;
-        }
+
 
         ret = write(sys_fd, "1", 1);
 
         close(sys_fd);
 
-        if(chmod(MAJOR_SYS, original_mode) == -1) {
-                printf("Qui 1\n");
+        if(chmod(MAJOR_SYS, original_mode) == -1)
                 return -1;
-        }
 
         return (ret == -1 && errno == EIO);
 }
