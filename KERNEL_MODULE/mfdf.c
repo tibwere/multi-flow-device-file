@@ -32,6 +32,15 @@ static struct device_state devs[MINORS];
 #endif
 
 
+static int __always_inline writable_bytes(struct data_flow *flow)
+{
+        if (flow->prio_level == HIGH_PRIO)
+                return BUFSIZE - flow->size_of_valid_area;
+        else
+                return BUFSIZE - flow->size_of_valid_area - flow->pending_bytes;
+}
+
+
 /**
  * Function invoked by wait_event_interruptible_timeout
  * to check space availability.
@@ -192,7 +201,6 @@ static int  __do_effective_write(struct data_flow *flow, const char *buff, size_
 
         total_length = from_start_length + to_end_length - residual;
         flow->size_of_valid_area += total_length;
-        flow->pending_bytes -= total_length;
 
         return total_length;
 }
@@ -206,12 +214,14 @@ static int  __do_effective_write(struct data_flow *flow, const char *buff, size_
  */
 static void write_on_buffer(unsigned long data)
 {
+        int ret;
         struct work_metadata *the_task = (struct work_metadata *)container_of((void*)data,struct work_metadata,the_work);
         pr_debug("%s kworker %d handle a write operation on the low priority flow of %s device [MAJOR: %d, minor: %d]",
                MODNAME, current->pid, DEVICE_NAME, the_task->major, the_task->minor);
 
         mutex_lock(&(the_task->active_flow->mu));
-        __do_effective_write(the_task->active_flow, the_task->buff, the_task->len, LOW_PRIO);
+        ret = __do_effective_write(the_task->active_flow, the_task->buff, the_task->len, LOW_PRIO);
+        the_task->active_flow->pending_bytes -= ret;
         mutex_unlock(&(the_task->active_flow->mu));
 
         wake_up_interruptible(&(the_task->active_flow->pending_requests));
@@ -361,7 +371,9 @@ static ssize_t mfdf_write(struct file *filp, const char __user *buff, size_t len
                 }
         }
 
-        if(is_high_active(filp)) {
+        len = MIN(len, writable_bytes(active_flow));
+
+        if(active_flow->prio_level == HIGH_PRIO) {
                 retval = __do_effective_write(active_flow, buff, len, HIGH_PRIO);
         } else {
                 retval = __deferred_write(active_flow, the_device->queue, filp, buff, len);
@@ -580,7 +592,7 @@ static struct kernel_param_ops major_ops = {
  * Array initialization of struct device_state devs
  */
 static int init_devices(void) {
-        int i;
+        int i, j;
         char wq_name[64];
 
         memset(devs, 0x0, MINORS * sizeof(struct device_state));
@@ -599,8 +611,10 @@ static int init_devices(void) {
                         break;
                 }
 
-                init_waitqueue_head(&(devs[i].flows[LOW_PRIO].pending_requests));
-                init_waitqueue_head(&(devs[i].flows[HIGH_PRIO].pending_requests));
+                for (j=0; j<2; ++j) {
+                        devs[i].flows[j].prio_level = j;
+                        init_waitqueue_head(&(devs[i].flows[j].pending_requests));
+                }
 
                 memset(wq_name, 0x0, 64);
                 snprintf(wq_name, 64, "mfdf-wq-%d-%d", major, i);
