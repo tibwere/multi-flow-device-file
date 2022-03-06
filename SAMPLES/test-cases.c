@@ -1,4 +1,3 @@
-#include <asm-generic/errno-base.h>
 #include <mfdf/ioctl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -89,7 +88,7 @@ int test_subsequent_low_writes(int fd, __attribute__ ((unused)) int minor)
         memset(expected_buff, 0x0, 4096);
         for (i=0; i<10; ++i) {
                 memset(temp_buff, 0x0, 16);
-                snprintf(temp_buff, 16, "Messaggio %d", i);
+                snprintf(temp_buff, 16, "Message %d", i);
                 mfdf_printf(fd, temp_buff, strlen(temp_buff));
                 strcat(expected_buff, temp_buff);
         }
