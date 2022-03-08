@@ -25,6 +25,7 @@
 #define ROW_LEN 81
 #define STANDING_ROW_LEN 14
 #define WAIT_TIME 3
+#define NON_BLOCK_VALID_ERRNO ((errno == EBUSY) || (errno == ENODEV) || (errno == EAGAIN) || (errno == ENOMEM))
 // #define SHOW_RESULTS
 
 struct test_case {
@@ -74,13 +75,18 @@ int test_immutable_major_from_sys(__attribute__ ((unused)) int fd, __attribute__
         if(chmod(MAJOR_SYS, original_mode) == -1)
                 return -1;
 
+#ifdef SHOW_RESULTS
+        printf("WRITE RETURN VALUE [expected: -1 -> actual: %d]\n", ret);
+        printf("ERRNO              [expected: %d (EIO) -> actual: %d]\n", EIO, errno);
+#endif
+
         return (ret == -1 && errno == EIO);
 }
 
 
 int test_subsequent_low_writes(int fd, __attribute__ ((unused)) int minor)
 {
-        int i;
+        int i, cmp;
         char buff[4096];
         char temp_buff[16];
         char expected_buff[4096];
@@ -98,7 +104,13 @@ int test_subsequent_low_writes(int fd, __attribute__ ((unused)) int minor)
         memset(buff, 0x0, 4096);
         mfdf_read(fd, buff, 4096);
 
-        return strcmp(expected_buff, buff) == 0;
+        cmp = strcmp(expected_buff, buff);
+
+#ifdef SHOW_RESULTS
+        printf("COMPARING STRINGS [expected: 0 (equals) -> actual: %d]\n", cmp);
+#endif
+
+        return cmp == 0;
 }
 
 
@@ -255,6 +267,8 @@ int test_write_less_read_more_high(int fd, __attribute__ ((unused)) int minor)
 }
 
 
+
+
 int __test_non_blocking_write_no_space(int fd, int prio)
 {
         int first_ret, second_ret;
@@ -271,9 +285,10 @@ int __test_non_blocking_write_no_space(int fd, int prio)
 
 #ifdef SHOW_RESULTS
         printf("FIRST WRITE  [expected: 4096 -> actual: %d]\n", first_ret);
-        printf("SECOND WRITE [expected: 0 -> actual: %d]\n", second_ret);
+        printf("SECOND WRITE [expected: -1 -> actual: %d]\n", second_ret);
+        printf("ERRNO        [expected: %d (EAGAIN), %d (ENOMEM), %d (ENODEV) or %d (EBUSY) -> actual: %d]\n", EAGAIN, ENOMEM, ENODEV, EBUSY, errno);
 #endif
-        return ((first_ret == 4096) && ((second_ret == 0) || ((second_ret == -1) && (errno == ENODEV))));
+        return ((first_ret == 4096) && (second_ret == -1) && NON_BLOCK_VALID_ERRNO);
 }
 
 
@@ -306,7 +321,7 @@ int __test_blocking_write_no_space(int fd, int prio)
 #ifdef SHOW_RESULTS
         printf("FIRST WRITE  [expected: 4096 -> actual: %d]\n", first_ret);
         printf("SECOND WRITE [expected: -1 -> actual: %d]\n", second_ret);
-        printf("ERRNO        [expected: %d -> actual: %d]\n", ETIME, second_ret);
+        printf("ERRNO        [expected: %d (ETIME) -> actual: %d]\n", ETIME, errno);
 #endif
 
         return (first_ret == 4096 && second_ret == -1 && errno == ETIME);
@@ -334,10 +349,11 @@ int __test_non_blocking_read_no_data(int fd, int prio)
         ret = mfdf_read(fd, buff, 16);
 
 #ifdef SHOW_RESULTS
-        printf("READ BYTES [expected: 0 -> actual: %d]\n", ret);
+        printf("READ BYTES [expected: -1 -> actual: %d]\n", ret);
+        printf("ERRNO      [expected: %d (EAGAIN), %d (ENOMEM), %d (ENODEV) or %d (EBUSY) -> actual: %d]\n", EAGAIN, ENOMEM, ENODEV, EBUSY, errno);
 #endif
 
-        return (ret == 0);
+        return ((ret == -1) && NON_BLOCK_VALID_ERRNO);
 }
 
 
@@ -363,8 +379,8 @@ int __test_blocking_read_no_data(int fd, int prio)
         ret = mfdf_read(fd, buff, 16);
 
 #ifdef SHOW_RESULTS
-        printf("READ BYTES [expected: -> -1 actual: %d]\n", ret);
-        printf("ERRNO      [expected: %d -> actual: %d]\n", ETIME, errno);
+        printf("READ BYTES [expected: -1 -> actual: %d]\n", ret);
+        printf("ERRNO      [expected: %d (ETIME) -> actual: %d]\n", ETIME, errno);
 #endif
 
         return (ret == -1 && errno == ETIME);
@@ -437,6 +453,10 @@ void do_test(int major, int minor)
         }
 
         printf(TABLE_ROW, minor+1, major, minor, the_test_case->name, outcome);
+
+#ifdef SHOW_RESULTS
+        printf("\n\n");
+#endif
 }
 
 
