@@ -271,7 +271,7 @@ static int mfdf_release(struct inode *inode, struct file *filp)
  * @buff:  user buffer containing the data to be written
  * @len:   length required to write
  */
-static int trigger_deferred_work(struct data_flow *flow, struct data_segment *new_data, struct file *filp)
+static int trigger_deferred_work(struct data_flow *flow, struct data_segment *new_data, struct file *filp, gfp_t flags)
 {
         struct work_metadata *the_task;
         struct workqueue_struct *queue;
@@ -285,7 +285,7 @@ static int trigger_deferred_work(struct data_flow *flow, struct data_segment *ne
 
         queue = devs[get_minor(filp)].queue;
 
-        the_task = (struct work_metadata *)kzalloc(sizeof(struct work_metadata), GFP_KERNEL);
+        the_task = (struct work_metadata *)kzalloc(sizeof(struct work_metadata), flags);
         if(unlikely(the_task == NULL)) {
                 kfree(new_data->buffer);
                 kfree(new_data);
@@ -319,23 +319,34 @@ static ssize_t mfdf_write(struct file *filp, const char __user *buff, size_t len
         int residual, retval;
         struct data_flow *active_flow;
         struct data_segment *the_data;
+        unsigned long (*copy_function) (void *to, const void __user *from, unsigned long n);
+        gfp_t flags;
 
         pr_debug("%s thread %d has called a write on %s device [MAJOR: %d, minor: %d]",
                MODNAME, current->pid, DEVICE_NAME, get_major(filp), get_minor(filp));
 
         active_flow = get_active_flow(filp);
 
-        the_data = (struct data_segment *)kzalloc(sizeof(struct data_segment), GFP_KERNEL);
+        if (is_block_write(filp)) {
+                flags = GFP_KERNEL;
+                copy_function = copy_from_user;
+        } else {
+                flags = GFP_ATOMIC;
+                // See https://www.kernel.org/doc/htmldocs/kernel-api/API---copy-from-user.html
+                copy_function = __copy_from_user_inatomic;
+        }
+
+        the_data = (struct data_segment *)kzalloc(sizeof(struct data_segment), flags);
         if (unlikely(the_data == NULL))
                 return -ENOMEM;
 
-        the_data->buffer = (char *)kzalloc(len, GFP_KERNEL);
+        the_data->buffer = (char *)kzalloc(len, flags);
         if (unlikely(the_data->buffer == NULL)) {
                 kfree(the_data);
                 return -ENOMEM;
         }
 
-        residual = copy_from_user(the_data->buffer, buff, len);
+        residual = copy_function(the_data->buffer, buff, len);
 
 
         if (is_block_write(filp)) {
@@ -377,7 +388,7 @@ static ssize_t mfdf_write(struct file *filp, const char __user *buff, size_t len
                 do_the_linkage(the_data, active_flow);
                 retval = the_data->size;
         } else {
-                retval = trigger_deferred_work(active_flow, the_data, filp);
+                retval = trigger_deferred_work(active_flow, the_data, filp, flags);
                 if (retval > 0)
                         active_flow->pending_bytes += retval;
         }
@@ -396,14 +407,21 @@ static ssize_t mfdf_write(struct file *filp, const char __user *buff, size_t len
  * @buff: user buffer containing the data to be written
  * @len:  size required
  */
-static int do_effective_read(struct data_flow *flow, char __user *buff, size_t len)
+static int do_effective_read(struct data_flow *flow, char __user *buff, size_t len, int is_block)
 {
         int residual;
         size_t read_bytes, current_readable_bytes, current_read_len;
         struct data_segment *curr;
         struct list_head *head;
+        unsigned long (*copy_function) (void *to, const void __user *from, unsigned long n);
 
         read_bytes = 0;
+
+        if (is_block)
+                copy_function = copy_to_user;
+        else
+                copy_function = __copy_to_user_inatomic;
+
 
         head = &(flow->head);
         while ((head->next != &(flow->tail)) && (len > read_bytes)) {
@@ -411,7 +429,7 @@ static int do_effective_read(struct data_flow *flow, char __user *buff, size_t l
                 current_readable_bytes = curr->size - curr->off;
                 current_read_len = MIN(len - read_bytes, current_readable_bytes);
 
-                residual = copy_to_user(buff + read_bytes, &(curr->buffer[curr->off]), current_read_len);
+                residual = copy_function(buff + read_bytes, &(curr->buffer[curr->off]), current_read_len);
                 read_bytes += (current_read_len - residual);
                 curr->off += (current_read_len - residual);
 
@@ -483,7 +501,7 @@ static ssize_t mfdf_read(struct file *filp, char __user *buff, size_t len, loff_
                 }
         }
 
-        retval = do_effective_read(active_flow, buff, len);
+        retval = do_effective_read(active_flow, buff, len, is_block_read(filp));
 
         mutex_unlock(&(active_flow->mu));
         wake_up_interruptible(&(active_flow->pending_requests));
