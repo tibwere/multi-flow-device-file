@@ -7,24 +7,25 @@
 #define MODNAME "MFDF:"          // Module name, useful for printk
 #define DEVICE_NAME "multi-flow" // Device name, useful for printk
 #define MINORS (128)             // Number of minors available
-#define BUFSIZE (PAGE_SIZE)      // Size of buffer
+#define BUFSIZE (PAGE_SIZE)      // Size of each data flow
 #define SYS_KOBJ_NAME "mfdf"     // Kernel object name (directory in /sys)
 
 
 /**
  * This structure represents the single stream (HIGH or LOW)
  * associated with the i-th device file (with 0 <= i <= 127).
- * It contains metadata such as the buffer, the boundaries of
- * valid area, the mutex for the atomicity of the operations
- * and some fields for the management of the deferred work
+ * It contains metadata such as the boundaries of the data,
+ * the priority level, the mutex for the atomicity of the
+ * operations and some fields for the management of the
+ * deferred work
  */
 struct data_flow {
         int                     prio_level;
         struct mutex            mu;
         struct wait_queue_head  pending_requests;
-        char                    *buffer;
-        int                     start_valid_area;
-        int                     size_of_valid_area;
+        struct list_head        head;
+        struct list_head        tail;
+        size_t                  valid_bytes;
         int                     pending_bytes;
         atomic_t                pending_threads;
 };
@@ -43,16 +44,30 @@ struct device_state {
 
 
 /**
+ * This structure represents the single data chunk written by
+ * a write operation. It contains the actual buffer, the current
+ * reading index, the total size (the buffer could theoretically
+ * contain more data but are not considered in any case) and
+ * finally a list_head field for the connectiona
+ */
+struct data_segment {
+        char             *buffer;
+        size_t           size;
+        off_t            off;
+        struct list_head links;
+};
+
+
+/**
  * This structure contains all the metadata necessary for the management
  * of the deferred work
  */
 struct work_metadata {
-        int                major;
-        int                minor;
-        struct data_flow   *active_flow;
-        char               buff[BUFSIZE];
-        size_t             len;
-        struct work_struct the_work;
+        int                 major;
+        int                 minor;
+        struct data_flow    *active_flow;
+        struct data_segment *new_data;
+        struct work_struct  the_work;
 };
 
 
