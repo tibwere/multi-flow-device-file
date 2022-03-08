@@ -3,6 +3,7 @@ obj-m += mfdf.o
 
 PREFIX  = /usr/local
 MODNAME = mfdf
+MOUNTED = $(shell /usr/bin/lsmod | /usr/bin/grep $(MODNAME))
 
 build:
 	make -C /lib/modules/$(shell uname -r)/build M=$(shell pwd) modules
@@ -19,4 +20,6 @@ clean:
 
 clean-all: clean
 	$(RM) $(PREFIX)/include/mfdf/ioctl.h
+ifneq ($(MOUNTED),)
 	rmmod $(MODNAME)
+endif
