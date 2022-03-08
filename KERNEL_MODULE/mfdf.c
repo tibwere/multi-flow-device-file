@@ -325,6 +325,9 @@ static ssize_t mfdf_write(struct file *filp, const char __user *buff, size_t len
         pr_debug("%s thread %d has called a write on %s device [MAJOR: %d, minor: %d]",
                MODNAME, current->pid, DEVICE_NAME, get_major(filp), get_minor(filp));
 
+        if (unlikely(len == 0))
+                return 0;
+
         active_flow = get_active_flow(filp);
 
         if (is_block_write(filp)) {
@@ -383,6 +386,13 @@ static ssize_t mfdf_write(struct file *filp, const char __user *buff, size_t len
         }
 
         the_data->size = MIN(len - residual, writable_bytes(active_flow));
+        if (unlikely(the_data->size) == 0) {
+                kfree(the_data->buffer);
+                kfree(the_data);
+
+                retval = -EAGAIN;
+                goto out;
+        }
 
         if (active_flow->prio_level == HIGH_PRIO) {
                 do_the_linkage(the_data, active_flow);
@@ -393,6 +403,7 @@ static ssize_t mfdf_write(struct file *filp, const char __user *buff, size_t len
                         active_flow->pending_bytes += retval;
         }
 
+out:
         mutex_unlock(&(active_flow->mu));
         wake_up_interruptible(&(active_flow->pending_requests));
 
@@ -465,6 +476,9 @@ static ssize_t mfdf_read(struct file *filp, char __user *buff, size_t len, loff_
         pr_debug("%s thread %d has called a read on %s device [MAJOR: %d, minor: %d]",
                MODNAME, current->pid, DEVICE_NAME ,get_major(filp), get_minor(filp));
 
+        if (unlikely(len == 0))
+                return 0;
+
         the_device = devs + get_minor(filp);
         active_flow = get_active_flow(filp);
 
@@ -501,7 +515,10 @@ static ssize_t mfdf_read(struct file *filp, char __user *buff, size_t len, loff_
                 }
         }
 
-        retval = do_effective_read(active_flow, buff, len, is_block_read(filp));
+        if (MIN(len, active_flow->valid_bytes) == 0)
+                retval = -EAGAIN;
+        else
+                retval = do_effective_read(active_flow, buff, len, is_block_read(filp));
 
         mutex_unlock(&(active_flow->mu));
         wake_up_interruptible(&(active_flow->pending_requests));
