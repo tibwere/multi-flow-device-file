@@ -454,7 +454,6 @@ static int do_effective_read(struct data_flow *flow, char __user *buff, size_t l
 static ssize_t mfdf_read(struct file *filp, char __user *buff, size_t len, loff_t *off)
 {
         int retval;
-        struct device_state *the_device;
         struct data_flow *active_flow;
 
         pr_debug("%s thread %d has called a read on %s device [MAJOR: %d, minor: %d]",
@@ -463,7 +462,6 @@ static ssize_t mfdf_read(struct file *filp, char __user *buff, size_t len, loff_
         if (unlikely(len == 0))
                 return 0;
 
-        the_device = devs + get_minor(filp);
         active_flow = get_active_flow(filp);
 
         if (is_block_read(filp)) {
