@@ -319,7 +319,6 @@ static ssize_t mfdf_write(struct file *filp, const char __user *buff, size_t len
         int residual, retval;
         struct data_flow *active_flow;
         struct data_segment *the_data;
-        unsigned long (*copy_function) (void *to, const void __user *from, unsigned long n);
         gfp_t flags;
 
         pr_debug("%s thread %d has called a write on %s device [MAJOR: %d, minor: %d]",
@@ -329,15 +328,7 @@ static ssize_t mfdf_write(struct file *filp, const char __user *buff, size_t len
                 return 0;
 
         active_flow = get_active_flow(filp);
-
-        if (is_block_write(filp)) {
-                flags = GFP_KERNEL;
-                copy_function = copy_from_user;
-        } else {
-                flags = GFP_ATOMIC;
-                // See https://www.kernel.org/doc/htmldocs/kernel-api/API---copy-from-user.html
-                copy_function = __copy_from_user_inatomic;
-        }
+        flags = (is_block_write(filp)) ? GFP_KERNEL : GFP_ATOMIC;
 
         the_data = (struct data_segment *)kzalloc(sizeof(struct data_segment), flags);
         if (unlikely(the_data == NULL))
@@ -349,7 +340,7 @@ static ssize_t mfdf_write(struct file *filp, const char __user *buff, size_t len
                 return -ENOMEM;
         }
 
-        residual = copy_function(the_data->buffer, buff, len);
+        residual = copy_from_user(the_data->buffer, buff, len);
 
 
         if (is_block_write(filp)) {
@@ -385,8 +376,7 @@ static ssize_t mfdf_write(struct file *filp, const char __user *buff, size_t len
                 }
         }
 
-        the_data->size = MIN(len - residual, writable_bytes(active_flow));
-        if (unlikely(the_data->size) == 0) {
+        if (unlikely(writable_bytes(active_flow) == 0)) {
                 kfree(the_data->buffer);
                 kfree(the_data);
 
@@ -394,6 +384,7 @@ static ssize_t mfdf_write(struct file *filp, const char __user *buff, size_t len
                 goto out;
         }
 
+        the_data->size = MIN(len - residual, writable_bytes(active_flow));
         if (active_flow->prio_level == HIGH_PRIO) {
                 do_the_linkage(the_data, active_flow);
                 retval = the_data->size;
@@ -424,15 +415,8 @@ static int do_effective_read(struct data_flow *flow, char __user *buff, size_t l
         size_t read_bytes, current_readable_bytes, current_read_len;
         struct data_segment *curr;
         struct list_head *head;
-        unsigned long (*copy_function) (void *to, const void __user *from, unsigned long n);
 
         read_bytes = 0;
-
-        if (is_block)
-                copy_function = copy_to_user;
-        else
-                copy_function = __copy_to_user_inatomic;
-
 
         head = &(flow->head);
         while ((head->next != &(flow->tail)) && (len > read_bytes)) {
@@ -440,7 +424,7 @@ static int do_effective_read(struct data_flow *flow, char __user *buff, size_t l
                 current_readable_bytes = curr->size - curr->off;
                 current_read_len = MIN(len - read_bytes, current_readable_bytes);
 
-                residual = copy_function(buff + read_bytes, &(curr->buffer[curr->off]), current_read_len);
+                residual = copy_to_user(buff + read_bytes, &(curr->buffer[curr->off]), current_read_len);
                 read_bytes += (current_read_len - residual);
                 curr->off += (current_read_len - residual);
 
@@ -515,7 +499,7 @@ static ssize_t mfdf_read(struct file *filp, char __user *buff, size_t len, loff_
                 }
         }
 
-        if (MIN(len, active_flow->valid_bytes) == 0)
+        if (unlikely(active_flow->valid_bytes == 0))
                 retval = -EAGAIN;
         else
                 retval = do_effective_read(active_flow, buff, len, is_block_read(filp));
