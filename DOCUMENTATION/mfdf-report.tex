@@ -138,7 +138,15 @@ In essa sono presenti:
         \item il numero di thread in attesa della disponibilità di dati da leggere o di spazio utilizzabile in scrittura.
 \end{itemize}
 
-Dalla specifica è noto come ogni device $i$ (con $0\leq i \leq 127$) debba supportare due flussi di dati associati a priorità distinte e che la selezione del livello su cui effettuare le operazioni sia \textbf{per sessione}, per cui in figura \ref{fig:get_active_flow} è riportato uno schema ulteriore di collegamento delle strutture dati.
+Un ulteriore struttura presente in figura \ref{fig:data} è la \texttt{data\_segment}, la quale rappresenta il chunk di dati scritto sul flusso da una singola operazione di scrittura. Per questo motivo al suo interno sono presenti:
+\begin{itemize}
+        \item il buffer effettivo in cui memorizzare i dati scritti,
+        \item la dimensione complessiva dei dati scritti dall'operazione,
+        \item l'offset a cui iniziare a leggere i dati,
+        \item una coppia di pointers (\texttt{struct list\_head}) per il collegamento con gli altri chunks.
+\end{itemize}
+
+Dalla specifica si evince come ogni device $i$ (con $0\leq i \leq 127$) debba supportare due flussi di dati associati a priorità distinte e che la selezione del livello su cui effettuare le operazioni sia \textbf{per sessione}, per cui in figura \ref{fig:get_active_flow} è riportato lo schema della soluzione scelta per implementare questa meccanica.
 
 \begin{figure}[htbp]
         \centering
@@ -147,7 +155,7 @@ Dalla specifica è noto come ogni device $i$ (con $0\leq i \leq 127$) debba supp
         \label{fig:get_active_flow}
 \end{figure}
 
-In figura \ref{fig:get_active_flow} sono presenti ulteriori due strutture:
+In particolare in essa sono compaiono altre due nuove strutture:
 \begin{itemize}
         \item la \texttt{device\_state} in cui sono contenuti i metadati associati al dispositivo, ovvero:
                 \begin{itemize}
