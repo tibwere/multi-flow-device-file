@@ -7,7 +7,7 @@
 #define MODNAME "MFDF:"          // Module name, useful for printk
 #define DEVICE_NAME "multi-flow" // Device name, useful for printk
 #define MINORS (128)             // Number of minors available
-#define BUFSIZE (PAGE_SIZE)      // Size of each data flow
+#define BUFSIZE (2*PAGE_SIZE)    // Size of each data flow
 #define SYS_KOBJ_NAME "mfdf"     // Kernel object name (directory in /sys)
 
 
