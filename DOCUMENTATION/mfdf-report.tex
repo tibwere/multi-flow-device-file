@@ -17,7 +17,7 @@
 % \usepackage{hhline}
 
 % Titolo del documento
-\title{\small Relazione progetto Sistemi Operativi Avanzati \\
+\title{\small Relazione del progetto di Sistemi Operativi Avanzati \\
 \Huge \textbf{Multi-flow Device File}}
 
 % Autore del documento
@@ -65,7 +65,7 @@
 \renewcommand{\lstlistingname}{Listato}
 \graphicspath{ {./figs/} }
 
-\newtcolorbox{nb}[1]{
+\newtcolorbox{box}[1]{
         colframe = blue!25,
         colback  = blue!10,
         coltitle = blue!20!black,
@@ -118,37 +118,67 @@ La realizzazione della specifica è stata organizzata all'interno del repository
 \end{itemize}
 
 \section*{Driver per la gestione dei dispositivi multi-flusso}
-Per gestire i dati associati al device $i$-esimo (con $0\leq i\leq127$), la scelta implementativa è ricaduta sull'utilizzo di un buffer circolare, così come mostrato in figura \ref{fig:buffer}. Per via della politica di gestione \texttt{FIFO} richiesta dalla specifica, è stato sufficiente mantenere l'indice di inizio della zona \textit{valida} e la sua taglia. La \textit{valid zone} rappresenta l'area, non necessariamente contigua per via della circolarità del buffer, in cui sono presenti i dati scritti, ma non ancora letti.
+\begin{figure}[htbp]
+        \centering
+        \includegraphics[width=.8\textwidth]{data}
+        \caption{Gestione dei dati all'interno dei vari devices}
+        \label{fig:data}
+\end{figure}
+
+In figura \ref{fig:data} è riportato uno schema dell'architettura adottata all'interno della soluzione proposta per la gestione dei dati. Una delle strutture adottate per la realizzazione dell'implementazione è la \texttt{data\_flow}, la quale rappresenta il singolo flusso di dati associato ad un device.
+
+In essa sono presenti:
+\begin{itemize}
+        \item il livello di priorità (\texttt{HIGH\_PRIO} o \texttt{LOW\_PRIO}), la cui utilità è descritta in seguito,
+        \item il mutex per garantire l'atomicità nell'aggiornamento delle strutture dati necessarie alla gestione del flusso di dati,
+        \item la wait queue dove i thread possono attendere nel caso in cui le loro richieste bloccanti non sono al momento soddisfacibili,
+        \item la testa e la coda di una lista collegata per l'effettiva memorizzazione dei dati, il cui meccanismo di collegamento è esemplificato in figura \ref{fig:data},
+        \item il numero di byte \textit{validi}, ovvero scritti ma non ancora letti,
+        \item il numero di byte \textit{pendenti}, ovvero accettati come deferred work ma non ancora effettivamente scritti nel flusso,
+        \item il numero di thread in attesa della disponibilità di dati da leggere o di spazio utilizzabile in scrittura.
+\end{itemize}
+
+Dalla specifica è noto come ogni device $i$ (con $0\leq i \leq 127$) debba supportare due flussi di dati associati a priorità distinte e che la selezione del livello su cui effettuare le operazioni sia \textbf{per sessione}, per cui in figura \ref{fig:get_active_flow} è riportato uno schema ulteriore di collegamento delle strutture dati.
 
 \begin{figure}[htbp]
         \centering
-        \includegraphics[width=.8\textwidth]{buffer}
-        \caption{Rappresentazione in memoria dei dati associati al dispositivo sotto forma di buffer circolare}
-        \label{fig:buffer}
+        \includegraphics[width=.8\textwidth]{get_active_flow}
+        \caption{Come reperire il flusso attualmente attivo a partire dalla sessione}
+        \label{fig:get_active_flow}
 \end{figure}
 
-Istante per istante, è possibile ricavare l'indice di successiva scrittura computandolo come segue:
-\[
-        \mathtt{next\_write} = (\mathtt{start\_of\_valid\_area} + \mathtt{size\_of\_valid\_area})\ \%\ \mathtt{BUFSIZE}
-\]
-dove per \texttt{BUFSIZE} è stato scelto \texttt{PAGE\_SIZE}, ovvero 4096 B.
-
-Logicamente ciascuno dei 128 dispositivi supportati dal device driver è stato rappresentato tramite la struttura dati \texttt{device\_state} la quale molto semplicemente contiene al suo interno:
+In figura \ref{fig:get_active_flow} sono presenti ulteriori due strutture:
 \begin{itemize}
-        \item il vettore di due elementi strutturati secondo la regola \texttt{data\_flow} di seguito analizzata,
-        \item il puntatore ad una work queue necessaria per la gestione delle scritture \textit{deferred} nel caso \texttt{LOW\_PRIO}.
+        \item la \texttt{device\_state} in cui sono contenuti i metadati associati al dispositivo, ovvero:
+                \begin{itemize}
+                        \item il vettore dei due flussi di dati associati al dispositivo,
+                        \item la work queue in cui accodare le scritture \texttt{LOW\_PRIO} che debbono essere gestite in modo deferred;
+                \end{itemize}
+        \item la \texttt{session\_metadata} che raccoglie al suo interno il set minimale di informazioni necessarie per la gestione della sessione aperta verso un device, quali:
+                \begin{itemize}
+                        \item l'indice per spiazzarsi all'interno dell'array di flussi contenuto all'interno della struttura \texttt{device\_state},
+                        \item il timeout da utilizzare nel caso in cui si deve attendere per dati da leggere o spazio utilizzabile in scrittura,
+                        \item le modalità, bloccanti o meno, di lettura e scrittura.
+                \end{itemize}
 \end{itemize}
 
-La struttura dati \texttt{data\_flow} è la principale in tutta l'architettura e raccoglie al suo interno i campi necessari alla gestione del singolo flusso di dati associato al dispositivo, quali:
+È opportuno osservare che tutti i campi della struttura \texttt{session\_metadata} vengono acceduti atomicamente, o perché definiti come \texttt{atomic[\_long]\_t}, o perché sono singoli bit.
+
+In definitiva dunque l'iter per reperire il riferimento al flusso corrente adottato in tutta l'implementazione è il seguente:
+\begin{enumerate}
+        \item si accede all'array globale \texttt{struct device\_state devs[MINORS]} utilizzando il minor number come indice, reperito in modalità differenti a seconda della versione del kernel Linux in esercizio,
+        \item si preleva dalla sessione l'indice di priorità attualmente configurato e lo si usa per spiazzarsi all'interno dell'array \texttt{flows}.
+\end{enumerate}
+
+\subsection*{File operation: \texttt{open}}
+La \texttt{mfdf\_open}, ovvero l'implementazione all'interno del driver dell'operazione di apertura è molto semplice e si limita a:
 \begin{itemize}
-        \item il buffer in/da cui scrivere/leggere i dati,
-        \item la posizione dell'inizio dell'area valida all'interno del buffer,
-        \item la taglia dell'area valida all'interno del buffer,
-        \item il livello di priorità associato al flusso (\texttt{HIGH\_PRIO} oppure \texttt{LOW\_PRIO}),
-        \item il \texttt{mutex} per sincronizzare le operazioni ed evitare, ad esempio, che i metadati vengano aggiornati per effetto di una scrittura ed una lettura contemporaneamente,
-        \item la wait queue dove accodare le richieste bloccanti nel caso in cui non vi siano dati disponibili in lettura oppure spazio utilizzabile in scrittura,
-        \item il numero di bytes \textit{pendenti}, ovvero per i quali è presente una richiesta di scrittura deferred già accettata dal driver, non ancora soddisfatta,
-        \item il numero di thread pendenti in attesa vi siano dati disponibili oppure spazio utilizzabile.
+        \item verificare se il dispositivo è correntemente abilitato, ed in caso contrario restituire il codice d'errore \texttt{EAGAIN} al chiamante,
+        \item allocare, mediante SLAB allocator, una \texttt{session\_metadata} descritta poc'anzi e collegarla alla \texttt{struct file} sfruttando l'apposito pointer generico \texttt{private\_data},
+        \item inizializzare i campi della sessione a valori di default (e.g. flusso attivo: \texttt{LOW\_PRIO}).
 \end{itemize}
+
+\subsection*{File operation: \texttt{release}}
+La \texttt{mfdf\_release}, ovvero l'implementazione all'interno del driver dell'operazione di rilascio, essendo duale dell'apertura si limita a liberare il buffer allocato per la memorizzazione dei metadati relativi alla sessione.
 
 \end{document}
