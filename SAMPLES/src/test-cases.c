@@ -26,7 +26,6 @@
 #define STANDING_ROW_LEN 14
 #define WAIT_TIME 3
 #define NON_BLOCK_VALID_ERRNO ((errno == EBUSY) || (errno == ENODEV) || (errno == EAGAIN) || (errno == ENOMEM))
-// #define SHOW_RESULTS
 
 struct test_case {
         const char *name;
@@ -75,7 +74,7 @@ int test_immutable_major_from_sys(__attribute__ ((unused)) int fd, __attribute__
         if(chmod(MAJOR_SYS, original_mode) == -1)
                 return -1;
 
-#ifdef SHOW_RESULTS
+#ifdef VERBOSE
         printf("WRITE RETURN VALUE [expected: -1 -> actual: %d]\n", ret);
         printf("ERRNO              [expected: %d (EIO) -> actual: %d]\n", EIO, errno);
 #endif
@@ -106,7 +105,7 @@ int test_subsequent_low_writes(int fd, __attribute__ ((unused)) int minor)
 
         cmp = strcmp(expected_buff, buff);
 
-#ifdef SHOW_RESULTS
+#ifdef VERBOSE
         printf("COMPARING STRINGS [expected: 0 (equals) -> actual: %d]\n", cmp);
 #endif
 
@@ -166,7 +165,7 @@ int __test_standing_threads(int fd, int minor, int prio)
 
         close(sysfd);
 
-#ifdef SHOW_RESULTS
+#ifdef VERBOSE
         printf("STANDING [expected: 5 -> actual: %d]\n", standing);
 #endif
 
@@ -213,7 +212,7 @@ int __test_standing_bytes(int fd, int minor, int prio)
         mfdf_read(fd, buff, 16);
         close(sysfd);
 
-#ifdef SHOW_RESULTS
+#ifdef VERBOSE
         printf("STANDING [expected: 7 (strlen(\"MESSAGE\") = %d) -> actual: %d]\n", ret, standing);
 #endif
 
@@ -245,7 +244,7 @@ int __test_write_less_read_more(int fd, int prio)
         rret = mfdf_read(fd, buff, 128);
 
 
-#ifdef SHOW_RESULTS
+#ifdef VERBOSE
         printf("WRITTEN BYTES   [expected: 7 (strlen(\"MESSAGE\") = %ld) -> actual: %d]\n", strlen("MESSAGE"), wret);
         printf("READ BYTES      [expected: 7 (strlen(\"MESSAGE\") = %ld) -> actual: %d]\n", strlen("MESSAGE"), rret);
         printf("COMPARE STRINGS [expected: 0 (EQUALS) -> actual: %d]\n", strcmp(buff, "MESSAGE"));
@@ -283,7 +282,7 @@ int __test_non_blocking_write_no_space(int fd, int prio)
 
         mfdf_read(fd, buff, 4096);
 
-#ifdef SHOW_RESULTS
+#ifdef VERBOSE
         printf("FIRST WRITE  [expected: 4096 -> actual: %d]\n", first_ret);
         printf("SECOND WRITE [expected: -1 -> actual: %d]\n", second_ret);
         printf("ERRNO        [expected: %d (EAGAIN), %d (ENOMEM), %d (ENODEV) or %d (EBUSY) -> actual: %d]\n", EAGAIN, ENOMEM, ENODEV, EBUSY, errno);
@@ -318,7 +317,7 @@ int __test_blocking_write_no_space(int fd, int prio)
 
         mfdf_read(fd, buff, 4096);
 
-#ifdef SHOW_RESULTS
+#ifdef VERBOSE
         printf("FIRST WRITE  [expected: 4096 -> actual: %d]\n", first_ret);
         printf("SECOND WRITE [expected: -1 -> actual: %d]\n", second_ret);
         printf("ERRNO        [expected: %d (ETIME) -> actual: %d]\n", ETIME, errno);
@@ -348,7 +347,7 @@ int __test_non_blocking_read_no_data(int fd, int prio)
         mfdf_set_read_modality(fd, NON_BLOCK);
         ret = mfdf_read(fd, buff, 16);
 
-#ifdef SHOW_RESULTS
+#ifdef VERBOSE
         printf("READ BYTES [expected: -1 -> actual: %d]\n", ret);
         printf("ERRNO      [expected: %d (EAGAIN), %d (ENOMEM), %d (ENODEV) or %d (EBUSY) -> actual: %d]\n", EAGAIN, ENOMEM, ENODEV, EBUSY, errno);
 #endif
@@ -378,7 +377,7 @@ int __test_blocking_read_no_data(int fd, int prio)
         mfdf_set_timeout(fd, WAIT_TIME);
         ret = mfdf_read(fd, buff, 16);
 
-#ifdef SHOW_RESULTS
+#ifdef VERBOSE
         printf("READ BYTES [expected: -1 -> actual: %d]\n", ret);
         printf("ERRNO      [expected: %d (ETIME) -> actual: %d]\n", ETIME, errno);
 #endif
@@ -401,22 +400,22 @@ int test_blocking_read_no_data_high(int fd, __attribute__ ((unused)) int minor)
 
 /* This array MUST be NULL terminated */
 static struct test_case test_cases[] = {
-        {"Blocking read with no data (LOW)", test_blocking_read_no_data_low},
-        {"Blocking read with no data (HIGH)", test_blocking_read_no_data_high},
-        {"Non-blocking read with no data (LOW)", test_non_blocking_read_no_data_low},
-        {"Non-blocking read with no data (HIGH)", test_non_blocking_read_no_data_high},
-        {"Blocking write with no space (LOW)", test_blocking_write_no_space_low},
-        {"Blocking write with no space (HIGH)", test_blocking_write_no_space_high},
-        {"Non-blocking write with no space (LOW)", test_non_blocking_write_no_space_low},
-        {"Non-blocking write with no space (HIGH)", test_non_blocking_write_no_space_high},
-        {"Write less byte than read ones (LOW)", test_write_less_read_more_low},
-        {"Write less byte than read ones (HIGH)", test_write_less_read_more_high},
-        {"Standing bytes (LOW)", test_standing_bytes_low},
-        {"Standing bytes (HIGH)", test_standing_bytes_high},
-        {"Standing threads (LOW)", test_standing_threads_low},
-        {"Standing threads (HIGH)", test_standing_threads_high},
-        {"Subsequent writes on low priority", test_subsequent_low_writes},
-        {"Immutable major from /sys pseudo file", test_immutable_major_from_sys},
+        {"Blocking read with no data (LOW)",            test_blocking_read_no_data_low},
+        {"Blocking read with no data (HIGH)",           test_blocking_read_no_data_high},
+        {"Non-blocking read with no data (LOW)",        test_non_blocking_read_no_data_low},
+        {"Non-blocking read with no data (HIGH)",       test_non_blocking_read_no_data_high},
+        {"Blocking write with no space (LOW)",          test_blocking_write_no_space_low},
+        {"Blocking write with no space (HIGH)",         test_blocking_write_no_space_high},
+        {"Non-blocking write with no space (LOW)",      test_non_blocking_write_no_space_low},
+        {"Non-blocking write with no space (HIGH)",     test_non_blocking_write_no_space_high},
+        {"Write less byte than read ones (LOW)",        test_write_less_read_more_low},
+        {"Write less byte than read ones (HIGH)",       test_write_less_read_more_high},
+        {"Standing bytes (LOW)",                        test_standing_bytes_low},
+        {"Standing bytes (HIGH)",                       test_standing_bytes_high},
+        {"Standing threads (LOW)",                      test_standing_threads_low},
+        {"Standing threads (HIGH)",                     test_standing_threads_high},
+        {"Subsequent writes on low priority",           test_subsequent_low_writes},
+        {"Immutable major from /sys pseudo file",       test_immutable_major_from_sys},
         {NULL, NULL}
 };
 /********************************************************************
@@ -454,7 +453,7 @@ void do_test(int major, int minor)
 
         printf(TABLE_ROW, minor+1, major, minor, the_test_case->name, outcome);
 
-#ifdef SHOW_RESULTS
+#ifdef VERBOSE
         printf("\n\n");
 #endif
 }

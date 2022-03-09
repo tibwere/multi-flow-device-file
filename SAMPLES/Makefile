@@ -1,23 +1,24 @@
-CC     = gcc
+CC         = gcc
 
 # Compilation flags
-LIBDIR = /usr/local/lib/mfdf
-INCLUDEDIR   = ./include
-CFLAGS = -Wall -Wextra -L$(LIBDIR) -I$(INCLUDEDIR)
+LIBDIR     = /usr/local/lib/mfdf
+INCLUDEDIR = ./include
+# To use MORE_FLAGS run make MORE_FLAGS=<...>
+CFLAGS     = -Wall -Wextra -L$(LIBDIR) -I$(INCLUDEDIR) $(MORE_FLAGS)
 
 # Directories
-BINDIR = ./bin
-OBJDIR = ./obj
-SRCDIR = ./src
+BINDIR     = ./bin
+OBJDIR     = ./obj
+SRCDIR     = ./src
 
 # Libraries
 BASELIB    = -lmfdfuser
-EXTRALIB = -pthread
+EXTRALIB   = -pthread
 
 # Other stuff
-DEPS = ./include/common.h
-DEMO = mfdf-demo
-TEST = mfdf-test-cases
+DEPS       = ./include/common.h
+DEMO       = mfdf-demo
+TEST       = mfdf-test-cases
 
 
 # Compile each source file
