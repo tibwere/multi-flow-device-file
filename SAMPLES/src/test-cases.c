@@ -16,6 +16,7 @@
 #define RED "\033[0;31m"
 #define YELLOW "\033[0;33m"
 
+#define SIZE (8192)
 #define TEST_DEV "/dev/test-mfdf"
 #define STANDING_BYTES_SYS "/sys/kernel/mfdf/standing_bytes"
 #define STANDING_THREADS_SYS "/sys/kernel/mfdf/standing_threads"
@@ -86,11 +87,11 @@ int test_immutable_major_from_sys(__attribute__ ((unused)) int fd, __attribute__
 int test_subsequent_low_writes(int fd, __attribute__ ((unused)) int minor)
 {
         int i, cmp;
-        char buff[4096];
+        char buff[SIZE];
         char temp_buff[16];
-        char expected_buff[4096];
+        char expected_buff[SIZE];
 
-        memset(expected_buff, 0x0, 4096);
+        memset(expected_buff, 0x0, SIZE);
         for (i=0; i<10; ++i) {
                 memset(temp_buff, 0x0, 16);
                 snprintf(temp_buff, 16, "Message %d", i);
@@ -100,8 +101,8 @@ int test_subsequent_low_writes(int fd, __attribute__ ((unused)) int minor)
 
         sleep(WAIT_TIME);
 
-        memset(buff, 0x0, 4096);
-        mfdf_read(fd, buff, 4096);
+        memset(buff, 0x0, SIZE);
+        mfdf_read(fd, buff, SIZE);
 
         cmp = strcmp(expected_buff, buff);
 
@@ -271,23 +272,23 @@ int test_write_less_read_more_high(int fd, __attribute__ ((unused)) int minor)
 int __test_non_blocking_write_no_space(int fd, int prio)
 {
         int first_ret, second_ret;
-        char buff[4096];
+        char buff[SIZE];
 
-        memset(buff, 0x41, 4096); // buff = "AA[...]AA"
+        memset(buff, 0x41, SIZE); // buff = "AA[...]AA"
 
         mfdf_set_priority(fd, prio);
         mfdf_set_write_modality(fd, NON_BLOCK);
-        first_ret = mfdf_write(fd, buff, 4096);
+        first_ret = mfdf_write(fd, buff, SIZE);
         second_ret = mfdf_write(fd, "This shouldn't be written to the device", strlen("This shouldn't be written to the device"));
 
-        mfdf_read(fd, buff, 4096);
+        mfdf_read(fd, buff, SIZE);
 
 #ifdef VERBOSE
-        printf("FIRST WRITE  [expected: 4096 -> actual: %d]\n", first_ret);
+        printf("FIRST WRITE  [expected: SIZE -> actual: %d]\n", first_ret);
         printf("SECOND WRITE [expected: -1 -> actual: %d]\n", second_ret);
         printf("ERRNO        [expected: %d (EAGAIN), %d (ENOMEM), %d (ENODEV) or %d (EBUSY) -> actual: %d]\n", EAGAIN, ENOMEM, ENODEV, EBUSY, errno);
 #endif
-        return ((first_ret == 4096) && (second_ret == -1) && NON_BLOCK_VALID_ERRNO);
+        return ((first_ret == SIZE) && (second_ret == -1) && NON_BLOCK_VALID_ERRNO);
 }
 
 
@@ -306,24 +307,24 @@ int test_non_blocking_write_no_space_high(int fd, __attribute__ ((unused)) int m
 int __test_blocking_write_no_space(int fd, int prio)
 {
         int first_ret, second_ret;
-        char buff[4096];
+        char buff[SIZE];
 
-        memset(buff, 0x41, 4096); // buff = "AA[...]AA"
+        memset(buff, 0x41, SIZE); // buff = "AA[...]AA"
 
         mfdf_set_priority(fd, prio);
         mfdf_set_timeout(fd, WAIT_TIME);
-        first_ret = mfdf_write(fd, buff, 4096);
+        first_ret = mfdf_write(fd, buff, SIZE);
         second_ret = mfdf_write(fd, "This shouldn't be written to the device", strlen("This shouldn't be written to the device"));
 
-        mfdf_read(fd, buff, 4096);
+        mfdf_read(fd, buff, SIZE);
 
 #ifdef VERBOSE
-        printf("FIRST WRITE  [expected: 4096 -> actual: %d]\n", first_ret);
+        printf("FIRST WRITE  [expected: SIZE -> actual: %d]\n", first_ret);
         printf("SECOND WRITE [expected: -1 -> actual: %d]\n", second_ret);
         printf("ERRNO        [expected: %d (ETIME) -> actual: %d]\n", ETIME, errno);
 #endif
 
-        return (first_ret == 4096 && second_ret == -1 && errno == ETIME);
+        return (first_ret == SIZE && second_ret == -1 && errno == ETIME);
 }
 
 int test_blocking_write_no_space_low(int fd, __attribute__ ((unused)) int minor)
