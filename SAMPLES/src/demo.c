@@ -22,7 +22,7 @@ int main()
                 return 1;
         }
 
-        if (mfdf_printf(fd, "Hi there, I'm using a multi flow device file with file descriptor no. %d\n", fd) == -1) {
+        if (mfdf_printf(fd, "Hi there, I'm using a multi flow device file with file descriptor no. %d", fd) == -1) {
                 fprintf(stderr, "Write error (errcode: %d)\n", errno);
                 return 1;
         }
