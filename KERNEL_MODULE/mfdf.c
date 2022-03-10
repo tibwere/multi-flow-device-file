@@ -552,6 +552,9 @@ static long mfdf_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
                         set_write_modality(filp, arg);
                         return 0;
                 case MFDF_IOCTL_SET_TOUT:
+                        if (arg > MAX_JIFFIES)
+                                return -EINVAL;
+
                         pr_debug("%s thread %d used an ioctl on %s device [MAJOR: %d, minor: %d] to set timeout for blocking operations to %ld",
                                MODNAME, current->pid, DEVICE_NAME ,get_major(filp), get_minor(filp), arg);
 
