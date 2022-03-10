@@ -401,22 +401,22 @@ int test_blocking_read_no_data_high(int fd, __attribute__ ((unused)) int minor)
 
 /* This array MUST be NULL terminated */
 static struct test_case test_cases[] = {
-        {"Blocking read with no data (LOW)",            test_blocking_read_no_data_low},
-        {"Blocking read with no data (HIGH)",           test_blocking_read_no_data_high},
-        {"Non-blocking read with no data (LOW)",        test_non_blocking_read_no_data_low},
-        {"Non-blocking read with no data (HIGH)",       test_non_blocking_read_no_data_high},
-        {"Blocking write with no space (LOW)",          test_blocking_write_no_space_low},
-        {"Blocking write with no space (HIGH)",         test_blocking_write_no_space_high},
-        {"Non-blocking write with no space (LOW)",      test_non_blocking_write_no_space_low},
-        {"Non-blocking write with no space (HIGH)",     test_non_blocking_write_no_space_high},
-        {"Write less byte than read ones (LOW)",        test_write_less_read_more_low},
-        {"Write less byte than read ones (HIGH)",       test_write_less_read_more_high},
-        {"Standing bytes (LOW)",                        test_standing_bytes_low},
-        {"Standing bytes (HIGH)",                       test_standing_bytes_high},
-        {"Standing threads (LOW)",                      test_standing_threads_low},
-        {"Standing threads (HIGH)",                     test_standing_threads_high},
-        {"Subsequent writes on low priority",           test_subsequent_low_writes},
-        {"Immutable major from /sys pseudo file",       test_immutable_major_from_sys},
+        {"Blocking read with no data (LOW)",        test_blocking_read_no_data_low},
+        {"Blocking read with no data (HIGH)",       test_blocking_read_no_data_high},
+        {"Non-blocking read with no data (LOW)",    test_non_blocking_read_no_data_low},
+        {"Non-blocking read with no data (HIGH)",   test_non_blocking_read_no_data_high},
+        {"Blocking write with no space (LOW)",      test_blocking_write_no_space_low},
+        {"Blocking write with no space (HIGH)",     test_blocking_write_no_space_high},
+        {"Non-blocking write with no space (LOW)",  test_non_blocking_write_no_space_low},
+        {"Non-blocking write with no space (HIGH)", test_non_blocking_write_no_space_high},
+        {"Write less byte than read ones (LOW)",    test_write_less_read_more_low},
+        {"Write less byte than read ones (HIGH)",   test_write_less_read_more_high},
+        {"Standing bytes (LOW)",                    test_standing_bytes_low},
+        {"Standing bytes (HIGH)",                   test_standing_bytes_high},
+        {"Standing threads (LOW)",                  test_standing_threads_low},
+        {"Standing threads (HIGH)",                 test_standing_threads_high},
+        {"Subsequent writes on low priority",       test_subsequent_low_writes},
+        {"Immutable major from /sys pseudo file",   test_immutable_major_from_sys},
         {NULL, NULL}
 };
 /********************************************************************
