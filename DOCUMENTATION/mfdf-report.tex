@@ -14,7 +14,7 @@
 \usepackage[section]{placeins}
 \usepackage{soulutf8}
 \usepackage{listings}
-% \usepackage{hhline}
+\usepackage{tabularray}
 
 % Titolo del documento
 \title{\small Relazione del progetto di Sistemi Operativi Avanzati \\
@@ -41,6 +41,7 @@
         pdfauthor={Simone Tiberi},
 }
 
+% Tokyonight colors
 \definecolor{tn-bg}{HTML}{24283b}
 \definecolor{tn-terminal}{HTML}{414868}
 \definecolor{tn-red}{HTML}{f7768e}
@@ -48,6 +49,9 @@
 \definecolor{tn-fg-dark}{HTML}{a9b1d6}
 \definecolor{tn-green}{HTML}{9ece6a}
 \definecolor{tn-comment}{HTML}{565f89}
+\definecolor{tn-blue0}{HTML}{3d59a1}
+\definecolor{tn-blue}{HTML}{7aa2f7}
+\definecolor{tn-cyan}{HTML}{7dcfff}
 
 \lstset{
 	language=C,
@@ -290,14 +294,20 @@ Per cui è stato creato un nuovo kernel object \texttt{mfdf} all'interno della d
 In definitiva dunque in tabella \ref{table:params} è riportata una sintesi di dove e come consultare le informazioni esposte tramite \texttt{sys}.
 
 \begin{table}[htbp]
-        \centering{\rowcolors{2}{gray!30}{gray!10}
-        \begin{tabular}{| l | l | l |}\hline
-                \rowcolor{gray!80}Informazione & Pseudofile & Permessi\\\hline
-                Abilitazione dispositivi & \texttt{/sys/module/mfdf/parameters/enable} & \texttt{0660}\\\hline
-                Major ottenuto dalla registrazione & \texttt{/sys/module/mfdf/parameters/major} & \texttt{0440}\\\hline
-                Byte standing per dispositivo & \texttt{/sys/kernel/mfdf/standing\_bytes} & \texttt{0440}\\\hline
-                Thread standing per dispositivo & \texttt{/sys/kernel/mfdf/standing\_threads} & \texttt{0440}\\\hline
-        \end{tabular}}
+        \centering
+        \begin{tblr}{
+                colspec = {|l|l|l|},
+                hlines,
+                row{odd} = {tn-blue},
+                row{even} = {tn-cyan},
+                row{1} = {tn-blue0,font=\bfseries\color{white}},
+        }
+        Informazione & Pseudofile & Permessi\\
+        Abilitazione dispositivi & \texttt{/sys/module/mfdf/parameters/enable} & \texttt{0660}\\
+        Major ottenuto dalla registrazione & \texttt{/sys/module/mfdf/parameters/major} & \texttt{0440}\\
+        Byte standing per dispositivo & \texttt{/sys/kernel/mfdf/standing\_bytes} & \texttt{0440}\\
+        Thread standing per dispositivo & \texttt{/sys/kernel/mfdf/standing\_threads} & \texttt{0440}\\
+        \end{tblr}
         \caption{Informazioni esposte in \texttt{sys}}
         \label{table:params}
 \end{table}
