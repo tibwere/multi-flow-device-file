@@ -23,7 +23,7 @@ install: build doc
 .PHONY: clean, clean-all
 
 clean:
-	$(RM) -r user.o libmfdfuser.a mfdf_user.h.0p
+	$(RM) -r user.o libmfdfuser.a mfdf_user.h.0p mfdf_user.h.0p.gz
 
 clean-all: clean
 	$(RM) $(GLOBALLIB)/libmfdfuser.a $(GLOBALHDR)/user.h $(GLOBALMAN)/mfdf_user.h.0p.gz
