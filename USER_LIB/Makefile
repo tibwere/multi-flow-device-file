@@ -9,16 +9,16 @@ build:
 	$(CC) -c user.c -o user.o $(CFLAGS)
 	$(ARC) libmfdfuser.a user.o
 
-build-man:
+doc:
 	pandoc mfdf_user.h.0p.md -s -t man -o mfdf_user.h.0p
 
-install: build build-man
+install: build doc
 	mkdir -p $(GLOBALLIB)
 	mkdir -p $(GLOBALMAN)
 	install -m 644 user.h $(GLOBALHDR)/user.h
 	install -m 755 libmfdfuser.a $(GLOBALLIB)/libmfdfuser.a
-	install -m 644 mfdf_user.h.0p $(GLOBALMAN)/mfdf_user.h.0p
-	gzip $(GLOBALMAN)/mfdf_user.h.0p
+	gzip mfdf_user.h.0p
+	install -m 644 mfdf_user.h.0p.gz $(GLOBALMAN)/mfdf_user.h.0p.gz
 
 .PHONY: clean, clean-all
 
