@@ -87,7 +87,7 @@
 \renewcommand{\arraystretch}{1.5}
 \setlength{\arrayrulewidth}{0.1em}
 
-\newcommand{\terminal}[1]{\colorbox{black}{\textcolor{white}{\texttt{#1}}}}
+\newcommand{\terminal}[1]{\colorbox{tn-bg}{\textcolor{tn-fg}{\texttt{#1}}}}
 
 \begin{document}
 \maketitle
@@ -357,5 +357,27 @@ Un esempio di utilizzo della libreria utente è riportato nel listato \ref{lst:d
 	escapechar=
 ]{../SAMPLES/src/demo.c}
 
+\section{Testing del modulo}
+Per testare il corretto funzionamento del modulo è stato utilizzato il file \texttt{SAMPLES/src/test-cases.c}. L'idea è stata quella di definire una struttura che rappresentasse il caso di test, ovvero la \texttt{struct test\_case} i cui campi sono:
+\begin{itemize}
+        \item il nome del test, per mostrarlo all'interno dell'interfaccia,
+        \item il function pointer della routine di test, il cui prototipo dev'esser del tipo \texttt{void T(int, int)}.
+\end{itemize}
+
+Per cui all'interno del \texttt{main} non si fa altro che:
+\begin{enumerate}
+        \item reperire il minor number leggendolo tramite funzione apposita da \texttt{/sys},
+        \item invocare per ogni entry dell'array \texttt{test\_cases} (list: \ref{lst:test-cases}) la funzione \texttt{do\_test} responsabile dell'inizializzazione dell'ambiente, del cleanup e della stampa dei risultati.
+\end{enumerate}
+
+\lstinputlisting[
+        caption={Test cases realizzati},
+	label={lst:test-cases},
+	escapechar=,
+        firstline=402,
+        lastline=421
+]{../SAMPLES/src/test-cases.c}
+
+In compilazione è possibile abilitare o meno la modalità \texttt{VERBOSE} per mostrare, per ciascun caso di test, valore atteso e valore attuale, mediante il comando \terminal{\$ make MORE\_FLAGS=-DVERBOSE}.
 
 \end{document}
