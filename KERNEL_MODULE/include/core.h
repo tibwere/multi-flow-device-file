@@ -2,6 +2,7 @@
 #define __H_CORE__
 
 #include <linux/kconfig.h> // for CONFIG_HZ constant
+#include <vdso/limits.h>   // for ULONG_MAX constant
 
 /* "Constants" macros */
 #define MODNAME "MFDF:"          // Module name, useful for printk
@@ -9,6 +10,7 @@
 #define MINORS (128)             // Number of minors available
 #define BUFSIZE (2*PAGE_SIZE)    // Size of each data flow
 #define SYS_KOBJ_NAME "mfdf"     // Kernel object name (directory in /sys)
+#define MAX_JIFFIES (ULONG_MAX / CONFIG_HZ)
 
 
 /**
@@ -147,9 +149,11 @@ struct session_metadata {
 
 /**
  * Gets the currently set value of the timeout
+ * n.b. direct casting is possible according to what is reported
+ * in https://www.kernel.org/doc/Documentation/atomic_t.txt
  */
 #define get_timeout(filp) \
-        atomic_long_read(session_metadata_field_addr((filp), timeout)) * CONFIG_HZ
+        (((unsigned long)atomic_long_read(session_metadata_field_addr((filp), timeout))) * CONFIG_HZ)
 
 
 /**
