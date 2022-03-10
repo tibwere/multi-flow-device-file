@@ -141,7 +141,7 @@ int __test_standing_threads(int fd, int minor, int prio)
         if((sysfd = open(STANDING_THREADS_SYS, O_RDONLY)) == -1)
                 return -1;
 
-        if(lseek(sysfd, STANDING_ROW_LEN * minor, SEEK_SET) == -1)
+        if(lseek(sysfd, STANDING_ROW_LEN * (minor + 1), SEEK_SET) == -1)
                 return -1;
 
         if(read(sysfd, buff, 16) == -1)
@@ -197,7 +197,7 @@ int __test_standing_bytes(int fd, int minor, int prio)
         if((sysfd = open(STANDING_BYTES_SYS, O_RDONLY)) == -1)
                 return -1;
 
-        if(lseek(sysfd, STANDING_ROW_LEN * minor, SEEK_SET) == -1)
+        if(lseek(sysfd, STANDING_ROW_LEN * (minor + 1), SEEK_SET) == -1)
                 return -1;
 
         if(read(sysfd, buff, 16) == -1)
