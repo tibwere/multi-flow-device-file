@@ -189,4 +189,88 @@ La \texttt{mfdf\_open}, ovvero l'implementazione all'interno del driver dell'ope
 \subsection*{File operation: \texttt{release}}
 La \texttt{mfdf\_release}, ovvero l'implementazione all'interno del driver dell'operazione di rilascio, essendo duale dell'apertura si limita a liberare il buffer allocato per la memorizzazione dei metadati relativi alla sessione.
 
+\subsection*{File operation: \texttt{write}}
+Nella \texttt{mfdf\_write}, ovvero l'implementazione all'interno del driver dell'operazione di scrittura, per prima cosa si pre-alloca la struttura \texttt{data\_segment} per il contenimento dei dati da scrivere per minimizzare la dimensione della sezione critica.
+
+È opportuno osservare che in funzione della modalità di scrittura correntemente selezionata nella sessione (bloccante o meno):
+\begin{itemize}
+        \item vengono impostati i flag per la richiesta di memoria (\texttt{GFP\_ATOMIC} o \texttt{GFP\_KERNEL}),
+        \item viene utilizzata la \texttt{lock} piuttosto che la \texttt{try\_lock}.
+\end{itemize}
+
+Si passa poi ad eseguire un blocco di codice responsabile di mandare eventualmente \textit{a dormire} i thread che effettuano richieste bloccanti non soddisfacibili. L'iter seguito è il seguente:
+\begin{enumerate}
+        \item si incrementa atomicamente il numero di thread pendenti,
+        \item si passa allo stato \texttt{TASK\_INTERRUPTIBLE} tramite la \texttt{wait\_event\_interruptible\_timeout}. Il controllo per il risveglio viene effettuato invocando una funzione che:\begin{enumerate}
+                \item prende il lock,
+                \item effettua il controllo,
+                \item in caso positivo ritorna \texttt{TRUE} altrimenti rilascia il lock e torna \texttt{FALSE}
+        \end{enumerate}
+        \item si decrementa atomicamente il numero di thread pendenti,
+        \item eventualmente si ritorna al chiamante restituendo come codici d'errore \texttt{ETIME} nel caso in cui la richiesta non è stata soddisfatta nel timeout settato o \texttt{EINTR} nel caso in cui il thread è stato colpito da segnale.
+\end{enumerate}
+
+Infine si passa ad effettuare l'effettiva scrittura, nel caso \texttt{HIGH\_PRIO} semplicemente invocando la funzione responsabile di effettuare il collegamento delle strutture dati come mostrato in fig. \ref{fig:data}, viceversa schedulando il deferred work come mostrato in fig. \ref{fig:deferred_work}.
+
+A tal proposito è stato scelto di utilizzare una work queue privata \textbf{single threaded} per garantire l'ordinamento FIFO. Questo perché la linearizzazione temporale delle scritture del buffer avviene prendendo come punto di riferimento l'istante di inserimento in coda.
+
+A livello implementativo la coda single threaded è stata realizzata in modo differente a seconda della versione del kernel Linux correntemente in esercizio:
+\begin{itemize}
+        \item tramite la \texttt{alloc\_ordered\_workqueue} dalla versione \texttt{2.6.36}, ovvero con l'avvento delle \textbf{CMWQ},
+        \item tramite la \texttt{create\_single\_threaded\_workqueue} viceversa
+\end{itemize}
+
+\begin{figure}[htbp]
+        \centering
+        \includegraphics[width=.8\textwidth]{deferred_work}
+        \caption{Inserimento di una deferred write in coda}
+        \label{fig:deferred_work}
+\end{figure}
+
+Relativamente al deferred work è opportuno analizzare l'uso del campo \texttt{pending\_bytes}. L'idea è quella di garantire che il valore restituito all'utente in modo sincrono sia effettivamente pari al numero di bytes scritti nel flusso in modo deferred.
+
+Per garantire ciò ogni qualvolta si verifica l'effettiva disponibilità di spazio scrivibile, nel caso \texttt{LOW\_PRIO} si tiene conto anche dei byte che sono stati già presi in carico, ma non sono ancora stati scritti, ovvero i \texttt{pending\_bytes}.
+
+Infine, prima di ritornare al chiamante, si invoca una \texttt{wake\_up\_interruptible} per risvegliare i thread in attesa. La scelta implementativa è stata quella di adottare una coda singola \textbf{per flusso}, in cui dunque confluiscono sia lettori che scrittori. Analizzando i possibili scenari è possibile accorgersi che nella maggior parte dei casi in coda \textbf{o} vi sono soltanto readers \textbf{o} soltanto writers.
+
+L'unica alternativa a ciò sono dei casi \textit{transienti} del tipo:
+\begin{itemize}
+        \item il flusso è saturo,
+        \item arriva una richiesta di scrittura bloccante da parte del thread $X$ che lo porta nello stato di \texttt{TASK\_INTERRUPTIBLE},
+        \item arriva una richiesta di lettura da parte del thread $Y$ di un numero di byte pari alla taglia massima del flusso di dati,
+        \item \ul{prima che lo scrittore venga risvegliato}, arriva un'ulteriore richiesta di scrittura da parte del thread $Z$, che lo porta nello stato di \texttt{TASK\_INTERRUPTIBLE}.
+\end{itemize}
+
+\subsection*{File operation: \texttt{read}}
+Nella \texttt{mfdf\_read}, ovvero l'implementazione all'interno del driver dell'operazione di lettura, per prima cosa si prende il lock per effettuare le operazioni, ancora una volta in modo bloccante (\texttt{lock}) o meno (\texttt{try\_lock}) a seconda della modalità correntemente selezionata.
+
+Dopodiché si entra all'interno del blocco di codice responsabile eventualmente di \textit{mandare a dormire} il thread richiedente del tutto equivalente a quello descritto per la \texttt{mfdf\_write}.
+
+Si invoca poi una funzione responsabile di effettuare l'effettiva lettura dei dati dalla lista di strutture \texttt{data\_segment} collegate al flusso e si risvegliano i thread in coda.
+\subsection{File operation: \texttt{ioctl}}
+La \texttt{mfdf\_ioctl} è caratterizzata da un prototipo condizionale all'interno dell'implementazione. Questo perché dalla versione \texttt{2.6.35} la \texttt{ioctl} è stata rimossa in favore di due alternative:
+\begin{itemize}
+        \item \texttt{compat\_ioctl} per la compatibilità con i programmi utente a 32 bit,
+        \item \texttt{unlocked\_ioctl} che a differenza della \textit{vecchia} \texttt{ioctl} \textbf{non prende il BKL}
+\end{itemize}
+
+A livello di prototipo, le due differiscono per la presenza di un pointer all'\texttt{inode} nella firma, che comunque non viene utilizzato per cui l'uso del costrutto \texttt{\#ifdef\dots\#endif} è limitato alla sola firma.
+
+A livello implementativo la funzione presenta uno switch case in cui in base al \texttt{cmd} passato vengono impostati i diversi campi della struttura \texttt{session\_metadata} previa aver sanitizzato dell'\texttt{arg} passato.
+
+\section*{Parametri del modulo}
+All'interno del VFS \texttt{sys} sono esposte diverse informazioni associate all'operatività del driver:
+\begin{itemize}
+        \item il valore del major number, utile per lo script di generazione di nodi e per la fase di testing (read only),
+        \item l'array dei flag di abilitazione dei devices (read/write),
+        \item il numero di byte standing nei due flussi per ogni dispositivo,
+        \item il numero di byte standing threads nei due flussi per ogni dispositivo.
+\end{itemize}
+
+In particolare per evitare che il major number venga modificato in maniera illegittima (e.g. cambiando manualmente i privilegi associati al file) anziché adottare la macro \texttt{module\_param} è stata utilizzata la versione con il callback esplicito andando a porre come operazione \texttt{set} \texttt{NULL}.
+
+Per quanto riguarda invece gli ultimi due punti dell'elenco precedente la strategia adottata è stata differente. Anziché estrarre dalle strutture dati i campi ed utilizzare array globali è stato preferito utilizzare \texttt{kobjects} e \texttt{kobj\_attribute} per esporre informazioni intrinsecamente \textbf{read only} e mantenere dunque i vari metadati raggruppati in modo semanticamente significativo.
+
+Per cui è stato creato un nuovo kernel object \texttt{mfdf} all'interno della directory \texttt{/sys/kernel} a cui sono stati associati due attributi, ovvero \texttt{standing\_bytes} e \texttt{standing\_threads}.
+
 \end{document}
