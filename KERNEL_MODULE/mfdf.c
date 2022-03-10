@@ -113,7 +113,8 @@ static ssize_t sb_show(struct kobject *kobj, struct kobj_attribute *attr, char *
 {
         int ret, i, high_av, low_av;
 
-        for(i=0, ret=0; i<MINORS; ++i) {
+        ret = sprintf(buf, "MIN LOWP HIGP\n");
+        for(i=0; i<MINORS; ++i) {
                 mutex_lock(&(devs[i].flows[LOW_PRIO].mu));
                 low_av = devs[i].flows[LOW_PRIO].valid_bytes;
                 mutex_unlock(&(devs[i].flows[LOW_PRIO].mu));
@@ -142,7 +143,8 @@ static ssize_t st_show(struct kobject *kobj, struct kobj_attribute *attr, char *
         int ret, i;
         struct data_flow *lowf, *highf;
 
-        for(i=0, ret=0; i<MINORS; ++i) {
+        ret = sprintf(buf, "MIN LOWP HIGP\n");
+        for(i=0; i<MINORS; ++i) {
                 lowf = &(devs[i].flows[LOW_PRIO]);
                 highf = &(devs[i].flows[HIGH_PRIO]);
                 ret += sprintf(buf + ret, SYS_FMT_LINE,
@@ -379,9 +381,8 @@ static ssize_t mfdf_write(struct file *filp, const char __user *buff, size_t len
         if (unlikely(writable_bytes(active_flow) == 0)) {
                 kfree(the_data->buffer);
                 kfree(the_data);
-
-                retval = -EAGAIN;
-                goto out;
+                mutex_unlock(&(active_flow->mu));
+                return -EAGAIN;
         }
 
         the_data->size = MIN(len - residual, writable_bytes(active_flow));
@@ -394,7 +395,6 @@ static ssize_t mfdf_write(struct file *filp, const char __user *buff, size_t len
                         active_flow->pending_bytes += retval;
         }
 
-out:
         mutex_unlock(&(active_flow->mu));
         wake_up_interruptible(&(active_flow->pending_requests));
 
@@ -585,10 +585,10 @@ static struct file_operations fops = {
 static struct kobject *mfdf_sys_kobj;
 
 /* Attribute for standing bytes */
-static struct kobj_attribute sb_attr = __ATTR(standing_bytes, 0440, sb_show, forbidden_store);
+static struct kobj_attribute sb_attr = __ATTR(standing_bytes, S_IRUSR | S_IRGRP, sb_show, forbidden_store);
 
 /* Attribute for standing threads */
-static struct kobj_attribute st_attr = __ATTR(standing_threads, 0440, st_show, forbidden_store);
+static struct kobj_attribute st_attr = __ATTR(standing_threads, S_IRUSR | S_IRGRP, st_show, forbidden_store);
 
 /* The group of attributes is useful for creating and deleting them all at once */
 static struct attribute *attrs[] = {
@@ -721,8 +721,8 @@ static void __exit mfdf_cleanup(void)
 }
 
 /* Things related to module management */
-module_param_cb(major, &major_ops, &major, 0440);
-module_param_array(enable, int, NULL, 0660);
+module_param_cb(major, &major_ops, &major, S_IRUSR | S_IRGRP);
+module_param_array(enable, int, NULL, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Simone Tiberi <simone.tiberi.98@gmail.com>");
