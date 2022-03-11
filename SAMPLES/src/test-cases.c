@@ -20,6 +20,7 @@
 #define TEST_DEV "/dev/test-mfdf"
 #define STANDING_BYTES_SYS "/sys/kernel/mfdf/standing_bytes"
 #define STANDING_THREADS_SYS "/sys/kernel/mfdf/standing_threads"
+#define ENABLE_SYS "/sys/module/mfdf/parameters/enable"
 #define TABLE_ROW "%2d) [M: %3d, m: %2d]      %-40s %-20s\n"
 #define TABLE_HDR "    %-20s %-40s %-20s\n"
 #define OUTCOME_LEN 30
@@ -55,6 +56,38 @@ void *read_worker(void *argptr)
 /********************************************************************
  ************************* START TEST CASES *************************
  ********************************************************************/
+int test_open_not_enabled(__attribute__ ((unused)) int fd, int minor)
+{
+        int i, ret, sysfd;
+        char buff[256];
+
+        memset(buff, 0x0, 256);
+        for (i=0, ret=0; i<minor; ++i)
+                ret += snprintf(buff + ret, 3, "Y,");
+        snprintf(buff + ret, 2, "N");
+
+        if((sysfd = open(ENABLE_SYS, O_WRONLY)) == -1)
+                return -1;
+
+        if(write(sysfd, buff, strlen(buff)) == -1)
+                return -1;
+
+        ret = mfdf_open(TEST_DEV, MFDF_READ_WRITE);
+
+        snprintf(buff + 2*minor, 2, "Y");
+
+        if(write(sysfd, buff, strlen(buff)) == -1)
+                return -1;
+
+#ifdef VERBOSE
+        printf("OPEN RETURN VALUE [expected: -1 -> actual: %d]\n", ret);
+        printf("ERRNO             [expected: %d (EAGAIN) -> actual: %d]\n", EAGAIN, errno);
+#endif
+
+        return (ret == -1 && errno == EAGAIN);
+}
+
+
 int __test_read_part_of_segment(int fd, int prio)
 {
         int ret;
@@ -457,6 +490,7 @@ static struct test_case test_cases[] = {
         {"Immutable major from /sys pseudo file",   test_immutable_major_from_sys},
         {"Read a segment in two steps (LOW)",       test_read_part_of_segment_low},
         {"Read a segment in two steps (HIGH)",      test_read_part_of_segment_high},
+        {"Open a disabled device",                  test_open_not_enabled},
         {NULL, NULL}
 };
 /********************************************************************
