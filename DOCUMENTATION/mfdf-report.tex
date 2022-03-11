@@ -107,20 +107,20 @@ La specifica richiede l'implementazione di un device driver Linux per la gestion
         \item il driver supporti al più \textbf{128} devices associati al corrispettivo minor number.
 \end{itemize}
 
-Il device driver deve implementare il supporto all'operazione \texttt{ioctl} al fine di gestire le sessioni di I/O e permettere:
+Il device driver deve implementare il supporto all'operazione \texttt{ioctl}, al fine di gestire le sessioni di I/O e permettere:
 \begin{itemize}
         \item di impostare il livello di priorità (\texttt{HIGH} or \texttt{LOW}) per le operazioni,
         \item di scegliere se effettuare letture e/o scritture in modo bloccante o meno,
-        \item di impostare un timeout per regolare il risveglio in caso di richieste bloccanti
+        \item di impostare un timeout per regolare il risveglio in caso di richieste bloccanti.
 \end{itemize}
 
 Inoltre è richiesto di implementare un meccanismo per abilitare o disabilitare i dispositivi in termini di minor numbers, basato sui parametri del modulo. Nel caso in cui un dispositivo sia disabilitato, ogni tentativo di apertura di nuova sessione deve fallire, ma devono comunque continuare ad essere gestite quelle aperte in precedenza.
 
 Altri parametri addizionali esposti tramite VFS devono fornire un'immagine dello stato corrente dei device in termini di:
 \begin{itemize}
-        \item stato corrente (\texttt{ENABLED} o \texttt{DISABLED}),
+        \item abilitazione,
         \item numero di byte correntemente presenti nei due flussi,
-        \item numero di thread correntemente in attesa nei due flussi
+        \item numero di thread correntemente in attesa nei due flussi.
 \end{itemize}
 
 \section{Struttura del repository}
@@ -129,7 +129,7 @@ La realizzazione della specifica è stata organizzata, all'interno del repositor
         \item nella radice è presente uno script \texttt{bash} per la creazione di nodi di I/O pilotabili con il driver sviluppato,
         \item in \texttt{KERNEL\_MODULE/} è contenuto il codice effettivo del driver,
         \item in \texttt{USER\_LIB/} è contenuta una libreria utente per facilitare l'interfacciamento con i nodi di I/O associati al driver sviluppato,
-        \item in \texttt{SAMPLES/} sono presenti una semplice demo e un file contenente diversi test cases
+        \item in \texttt{SAMPLES/} sono presenti una semplice demo e un file contenente diversi test cases.
 \end{itemize}
 
 \section{Driver per la gestione dei dispositivi multi-flusso}
@@ -140,7 +140,7 @@ La realizzazione della specifica è stata organizzata, all'interno del repositor
         \label{fig:data}
 \end{figure}
 
-In fig. \ref{fig:data} è riportato uno schema dell'architettura adottata, all'interno della soluzione proposta, per la gestione dei dati. Una delle strutture adottate per la realizzazione dell'implementazione è la \texttt{data\_flow}, la quale rappresenta il singolo flusso di dati associato ad un device.
+In fig. \ref{fig:data} è riportato uno schema dell'architettura adottata, all'interno della soluzione proposta, per la gestione dei dati. Una delle strutture adottate, per la realizzazione dell'implementazione, è la \texttt{data\_flow}, la quale rappresenta il singolo flusso di dati associato ad un device.
 
 In essa sono presenti:
 \begin{itemize}
@@ -172,14 +172,14 @@ Dalla specifica si evince come ogni device $i$ (con $0\leq i \leq 127$) debba su
 
 In particolare in essa sono compaiono altre due nuove strutture:
 \begin{itemize}
-        \item la \texttt{device\_state} in cui sono contenuti i metadati associati al dispositivo, ovvero:
+        \item la \texttt{device\_state}, in cui sono contenuti i metadati associati al dispositivo, quali:
                 \begin{itemize}
                         \item il vettore dei due flussi di dati,
                         \item la work queue in cui accodare le scritture \texttt{LOW\_PRIO} che debbono essere gestite in modo deferred;
                 \end{itemize}
-        \item la \texttt{session\_metadata} che raccoglie al suo interno il set minimale di informazioni necessarie per la gestione della sessione aperta verso un device, quali:
+        \item la \texttt{session\_metadata} che raccoglie al suo interno il set minimale di informazioni necessarie per la gestione della sessione aperta verso un device, ovvero:
                 \begin{itemize}
-                        \item l'indice per spiazzarsi all'interno dell'array di flussi contenuto all'interno della struttura \texttt{device\_state},
+                        \item l'indice necessario al fine di spiazzarsi all'interno dell'array di flussi contenuto nella struttura \texttt{device\_state},
                         \item il timeout da utilizzare nel caso in cui si deve attendere per dati da leggere o spazio utilizzabile in scrittura,
                         \item le modalità, bloccanti o meno, di lettura e scrittura.
                 \end{itemize}
@@ -189,7 +189,7 @@ In particolare in essa sono compaiono altre due nuove strutture:
 
 In definitiva dunque l'iter per reperire il riferimento al flusso corrente adottato in tutta l'implementazione, attraverso la macro \texttt{get\_active\_flow}, è il seguente:
 \begin{enumerate}
-        \item si accede all'array globale \texttt{struct device\_state devs[MINORS]} utilizzando il minor number come indice, reperito in modalità differenti a seconda della versione del kernel Linux in esercizio,
+        \item si accede all'array globale \texttt{struct device\_state devs[MINORS]} utilizzando il minor number come indice. Questo viene reperito in modalità differenti a seconda della versione del kernel Linux in esercizio, sfruttando una macro apposita;
         \item si preleva dalla sessione l'indice di priorità attualmente configurato e lo si usa per spiazzarsi all'interno dell'array \texttt{flows}.
 \end{enumerate}
 
@@ -206,12 +206,12 @@ La \texttt{mfdf\_open}, ovvero l'implementazione all'interno del driver dell'ope
 La \texttt{mfdf\_release}, ovvero l'implementazione all'interno del driver dell'operazione di rilascio, essendo duale dell'apertura, si limita a liberare il buffer allocato per la memorizzazione dei metadati relativi alla sessione.
 
 \subsubsection{Scrittura (\texttt{write})}
-Nella \texttt{mfdf\_write}, ovvero l'implementazione all'interno del driver dell'operazione di scrittura, per prima cosa si pre-alloca la struttura \texttt{data\_segment} in cui scrivere i dati richiesti per minimizzare la dimensione della sezione critica.
+Nella \texttt{mfdf\_write}, ovvero l'implementazione all'interno del driver dell'operazione di scrittura, per prima cosa si \textit{pre-alloca} la struttura \texttt{data\_segment} in cui scrivere i dati richiesti, per minimizzare la dimensione della sezione critica.
 
-È opportuno osservare che in funzione della modalità di scrittura correntemente selezionata nella sessione, bloccante o meno:
+È opportuno osservare che in funzione della modalità di scrittura selezionata nella sessione:
 \begin{itemize}
         \item vengono impostati i flag per la richiesta di memoria (\texttt{GFP\_ATOMIC} o \texttt{GFP\_KERNEL}),
-        \item viene utilizzata la \texttt{mutex\_lock} piuttosto che la \texttt{mutex\_trylock}.
+        \item viene utilizzata la \texttt{mutex\_trylock} piuttosto che la \texttt{mutex\_lock}.
 \end{itemize}
 
 Si passa poi ad eseguire un blocco di codice responsabile di mandare eventualmente \textit{a dormire} i thread che effettuano richieste bloccanti non soddisfacibili. L'iter seguito è il seguente:
@@ -230,11 +230,15 @@ Si passa poi ad eseguire un blocco di codice responsabile di mandare eventualmen
                 \end{itemize}
 \end{enumerate}
 
-Infine si passa ad effettuare l'effettiva scrittura, nel caso \texttt{HIGH\_PRIO} semplicemente invocando la funzione responsabile di effettuare il collegamento delle strutture dati come mostrato in fig. \ref{fig:data}, viceversa schedulando il deferred work (fig. \ref{fig:deferred_work}).
+Dopodiché si effettua realmente la scrittura:
+\begin{itemize}
+        \item nel caso \texttt{HIGH\_PRIO}, semplicemente invocando la funzione responsabile di effettuare il collegamento delle strutture dati come mostrato in fig. \ref{fig:data},
+        \item nel caso \texttt{LOW\_PRIO} schedulando il deferred work. A tal proposito in fig. \ref{fig:deferred_work} è riportata la relazione che sussiste fra le strutture in gioco.
+\end{itemize}
 
-A tal proposito è stato scelto di utilizzare una work queue privata \textbf{single threaded} per garantire l'ordinamento FIFO. Questo perché la linearizzazione temporale delle scritture del buffer avviene prendendo come punto di riferimento l'istante di inserimento in coda.
+A livello implementativo, è stato scelto di utilizzare una work queue privata \textit{single threaded} per garantire l'ordinamento FIFO. Questo perché la linearizzazione temporale delle scritture del buffer avviene prendendo come punto di riferimento l'istante di inserimento in coda (i.e. non è possibile che se il thread $T_1$ inserisce in coda una scrittura \textbf{prima} del thread $T_2$, questa venga effettivamente scritta sul flusso \textbf{prima} della precedente).
 
-A livello implementativo la coda \textit{single threaded} è stata realizzata in modo differente a seconda della versione del kernel Linux correntemente in esercizio:
+L'allocazione delle code \textit{single threaded} è stata realizzata in modo differente a seconda della versione del kernel Linux correntemente in esercizio:
 \begin{itemize}
         \item tramite la \texttt{alloc\_ordered\_workqueue} dalla versione \texttt{2.6.36}, ovvero con l'avvento delle \textbf{CMWQ} (\textbf{C}oncurrency \textbf{M}anaged \textbf{W}ork\textbf{Q}ueue),
         \item tramite la \texttt{create\_single\_threaded\_workqueue} viceversa
@@ -247,13 +251,13 @@ A livello implementativo la coda \textit{single threaded} è stata realizzata in
         \label{fig:deferred_work}
 \end{figure}
 
-Relativamente al deferred work è opportuno analizzare l'uso del campo \texttt{pending\_bytes}. L'idea è quella di garantire che il valore restituito all'utente in modo sincrono sia effettivamente pari al numero di bytes scritti nel flusso in modo deferred.
+Relativamente al deferred work, è opportuno analizzare l'uso del campo \texttt{pending\_bytes}. L'idea è quella di garantire che il valore restituito all'utente in modo sincrono sia effettivamente pari al numero di bytes scritti nel flusso in modo deferred.
 
 Per garantire ciò ogni qualvolta si verifica l'effettiva disponibilità di spazio scrivibile, nel caso \texttt{LOW\_PRIO} si tiene conto anche dei byte che sono stati già presi in carico, ma non sono ancora stati scritti, ovvero i \texttt{pending\_bytes}.
 
-Infine, prima di ritornare al chiamante, si invoca una \texttt{wake\_up\_interruptible} per risvegliare i thread in attesa. La scelta implementativa è stata quella di adottare una coda singola \textbf{per flusso}, in cui dunque confluiscono sia lettori che scrittori. Analizzando i possibili scenari è possibile accorgersi che nella maggior parte dei casi in coda \textbf{o} vi sono soltanto readers \textbf{o} soltanto writers.
+Infine, prima di ritornare al chiamante, si invoca una \texttt{wake\_up\_interruptible} per risvegliare i thread in attesa. La scelta implementativa è stata quella di adottare una coda singola \textbf{per flusso}, in cui dunque confluiscono sia lettori che scrittori. Analizzando i possibili scenari è facile accorgersi che nella maggior parte dei casi in coda o vi sono soltanto readers o soltanto writers.
 
-L'unica alternativa a ciò sono dei casi \textit{transienti} del tipo:
+L'unica alternativa a ciò, si verifica in casi \textit{transienti} come la timeline di seguito riportata:
 \begin{enumerate}
         \item il flusso è saturo,
         \item arriva una richiesta di scrittura bloccante da parte del thread $X$ che lo porta nello stato di \texttt{TASK\_INTERRUPTIBLE},
@@ -266,17 +270,17 @@ Nella \texttt{mfdf\_read}, ovvero l'implementazione all'interno del driver dell'
 
 Dopodiché si entra all'interno del blocco di codice responsabile eventualmente di \textit{mandare a dormire} il thread richiedente, del tutto equivalente a quello descritto per la \texttt{mfdf\_write}.
 
-Si invoca poi una funzione responsabile di effettuare l'effettiva lettura dei dati dalla lista di strutture \texttt{data\_segment} collegate al flusso.
+Si invoca poi una funzione responsabile di realizzare l'effettiva lettura dei dati dalla lista di strutture \texttt{data\_segment} collegate al flusso.
 
 L'idea in questo caso è quella di leggere a partire da \texttt{head->next}, ovvero il primo \texttt{data\_segment} associato al flusso, fintantoché non si arriva alla \texttt{tail} e, ad ogni iterazione:
 \begin{enumerate}
-        \item si computano i byte effettivamente leggibili come $\min\lbrace\Delta_{tot}, \Delta_{segment}\rbrace$, dove:
+        \item computare i byte effettivamente leggibili come $\min\lbrace\Delta_{tot}, \Delta_{segment}\rbrace$, dove:
                 \begin{itemize}
                         \item $\Delta_{tot}$ corrisponde alla differenza tra quanto è stato richiesto di leggere e quanto è stato già letto,
-                        \item $\Delta_{segment}$ corrisponde alla differenza tra la taglia complessiva dei dati contenuti in $segment$ e quanti byte sono stati già letti da esso;
+                        \item $\Delta_{segment}$ corrisponde alla differenza tra la taglia complessiva dei dati contenuti in $segment$ e quanti byte sono stati già letti da esso per via di letture precedenti;
                 \end{itemize}
-        \item si copiano i byte all'interno del buffer specificato dall'utente, aggiornando il numero totale di byte letti e l'offset del segmento corrente,
-        \item nel caso in cui sono stati letti tutti i byte nel segmento, si procede a scollegarlo dalla lista, facendo dunque puntare la testa all'elemento successivo.
+        \item copiare i byte all'interno del buffer specificato dall'utente, aggiornando il numero totale di byte letti e l'offset del segmento corrente,
+        \item nel caso in cui siano stati letti tutti i byte nel segmento, procedere a scollegarlo dalla lista, facendo dunque puntare la testa all'elemento successivo.
 \end{enumerate}
 
 Infine si risvegliano i thread in coda prima di restituire il numero di byte letti al chiamante.
@@ -284,14 +288,14 @@ Infine si risvegliano i thread in coda prima di restituire il numero di byte let
 La \texttt{mfdf\_ioctl} è caratterizzata da un prototipo condizionale all'interno dell'implementazione. Questo perché dalla versione \texttt{2.6.35} la \texttt{ioctl} è stata rimossa in favore di due alternative:
 \begin{itemize}
         \item \st{\texttt{compat\_ioctl}} per la compatibilità con i programmi utente a 32 bit,
-        \item \ul{\texttt{unlocked\_ioctl}} che a differenza della \textit{vecchia} \texttt{ioctl} \textbf{non prende il BKL}
+        \item \ul{\texttt{unlocked\_ioctl}} che, a differenza della \textit{vecchia} \texttt{ioctl}, \textbf{non prende il BKL} (\textbf{B}ig \textbf{K}ernel \textbf{L}ock).
 \end{itemize}
 
-A livello di prototipo, la versione \texttt{unlocked} e quella tradizionale differiscono per la presenza di un pointer all'\texttt{inode} nella firma, che comunque non viene utilizzato per cui l'uso del costrutto \texttt{\#ifdef\dots\#endif} è limitato alla sola firma.
+A livello di prototipo, la versione \texttt{unlocked} e quella tradizionale differiscono per la presenza di un pointer all'\texttt{inode} nella firma, che comunque non viene utilizzato. Per questo motivo l'uso del costrutto \texttt{\#ifdef\dots\#endif} è limitato alla sola firma.
 
-A livello implementativo la funzione presenta uno switch case in cui in base al \texttt{cmd} passato vengono impostati i diversi campi della struttura \texttt{session\_metadata}, previa aver sanitizzato l'\texttt{arg} passato.
+A livello implementativo, la funzione presenta uno switch-case in cui, in base al \texttt{cmd} passato, vengono impostati i diversi campi della struttura \texttt{session\_metadata}, previa aver sanitizzato l'\texttt{arg} passato.
 
-Per evitare di utilizzare come \texttt{cmd} codici già utilizzati è stata adottata la macro \texttt{\_IOW} definita all'interno dell'header file \texttt{linux/ioctl.h} la quale genera l'operational code a partire da:
+Per evitare di utilizzare come \texttt{cmd} codici \textit{well-known} è stata adottata la macro \texttt{\_IOW}, definita all'interno dell'header file \texttt{linux/ioctl.h}, la quale genera l'operational code a partire da:
 \begin{itemize}
         \item un \textit{magic number} unico in tutto il kernel,
         \item un codice effettivo unico all'interno del driver.
@@ -306,13 +310,13 @@ All'interno del VFS \texttt{sys} sono esposte diverse informazioni associate all
         \item il numero di byte standing threads nei due flussi per ogni dispositivo (read only).
 \end{itemize}
 
-In particolare per evitare che il major number venga modificato in maniera illegittima (e.g. cambiando manualmente i privilegi associati al file), anziché adottare la macro \texttt{module\_param} è stata utilizzata la versione con il callback esplicito andando a porre come operazione \texttt{set} \texttt{NULL}.
+In particolare, per evitare che il major number venga modificato in maniera illegittima (e.g. cambiando manualmente i privilegi associati al file), anziché adottare la macro \texttt{module\_param} è stata utilizzata la versione con il callback esplicito, andando a porre come operazione \texttt{set} \texttt{NULL}.
 
-Per quanto riguarda invece gli ultimi due punti dell'elenco precedente la strategia adottata è stata differente. Anziché estrarre dalle strutture dati i campi ed utilizzare array globali è stato preferito utilizzare \texttt{kobjects} e \texttt{kobj\_attribute} per esporre informazioni intrinsecamente read only e mantenere dunque i vari metadati raggruppati in modo semanticamente significativo.
+Per quanto riguarda invece gli ultimi due punti dell'elenco precedente, la strategia adottata è stata differente. Anziché estrarre dalle strutture dati i campi ed utilizzare array globali, è stato preferito utilizzare \texttt{kobjects} e \texttt{kobj\_attribute}, per esporre informazioni intrinsecamente read only e mantenere dunque i vari metadati raggruppati in modo semanticamente significativo.
 
-Per cui è stato creato un nuovo kernel object \texttt{mfdf} all'interno della directory \texttt{/sys/kernel} a cui sono stati associati due attributi, ovvero \texttt{standing\_bytes} e \texttt{standing\_threads}.
+Per cui è stato creato un nuovo kernel object \texttt{mfdf} all'interno della directory \texttt{/sys/kernel}, a cui sono stati associati due attributi, ovvero \texttt{standing\_bytes} e \texttt{standing\_threads}.
 
-In definitiva dunque in tabella \ref{table:params} è riportata una sintesi di dove e come consultare le informazioni esposte tramite \texttt{sys}.
+In definitiva dunque in tabella \ref{table:params} è riportata una sintesi di \textit{dove} e \textit{come} consultare le informazioni esposte tramite \texttt{sys}.
 
 \begin{table}[htbp]
         \centering
@@ -336,12 +340,12 @@ In definitiva dunque in tabella \ref{table:params} è riportata una sintesi di d
 \subsection{Installazione del modulo}
 Per installare il modulo kernel è possibile utilizzare le regole specificate all'interno del \texttt{Makefile}:
 \begin{itemize}
-        \item \terminal{\$ make} compila il modulo utilizzando la regola \texttt{make modules} di \texttt{kbuild},
-        \item \terminal{\# make install} installa il modulo tramite \texttt{insmod} ed installa l'header file necessario per l'utilizzo dell'\texttt{ioctl} \textit{user-level} in \texttt{/usr/local/include/mfdf/ioctl.h},
+        \item \terminal{\$ make} compila il modulo, utilizzando la regola \texttt{make modules} di \texttt{kbuild},
+        \item \terminal{\# make install} monta il modulo, tramite \texttt{insmod}, ed installa l'header file necessario per l'utilizzo dell'\texttt{ioctl} \textit{user-level} in \texttt{/usr/local/include/mfdf},
         \item \terminal{\$ make clean} rimuove l'output della compilazione dalla directory locale,
         \item \terminal{\# make clean-all} in più al semplice \texttt{clean}:
                 \begin{itemize}
-                        \item smonta il modulo se questo è effettivamente montato, sfruttando un costrutto condizionale per evitare errori,
+                        \item smonta il modulo, se questo è effettivamente montato, sfruttando un costrutto condizionale per evitare errori,
                         \item rimuove l'header file \texttt{/usr/local/include/mfdf/ioctl.h}.
                 \end{itemize}
 \end{itemize}
@@ -349,7 +353,7 @@ Per installare il modulo kernel è possibile utilizzare le regole specificate al
 \section{Libreria utente}
 La libreria utente è costituita da una serie di ridefinizioni, tramite direttive \texttt{\#define}, di alcune funzioni tipiche delle librerie \texttt{fcntl.h} e \texttt{unistd.h} tipiche per la gestione di oggetti di I/O (e.g. \texttt{open}, \texttt{write}, \dots).
 
-L'unica funzione effettivamente realizzata \textit{ex-novo} è un wrapper della write per poter formattare il \textit{cosa} scrivere secondo una regola \texttt{printf}-like.
+L'unica funzione effettivamente realizzata \textit{ex-novo} è un wrapper della write, per poter formattare il \textit{cosa} scrivere secondo una regola \texttt{printf}-like.
 
 Relativamente al Makefile presente nella directory, tramite la regola:
 \begin{itemize}
@@ -358,12 +362,12 @@ Relativamente al Makefile presente nella directory, tramite la regola:
                         \item il file oggetto (\texttt{user.o}),
                         \item l'archivio utilizzabile dal linker (\texttt{libmfdfuser.a});
                 \end{itemize}
-        \item \terminal{\$ make doc} è possibile converire il file markdown contenente il manuale della libreria utente nel formato delle manpages;
+        \item \terminal{\$ make doc} è possibile convertire il file markdown contenente il manuale della libreria utente nel formato delle manpages;
         \item \terminal{\# make install} è possibile:
                 \begin{itemize}
-                        \item installare l'header file contenente le direttive \texttt{\#define} ed il prototipo della funzione \texttt{printf}-like sopra citate all'interno della directory \texttt{/usr/local/include/mfdf},
+                        \item installare l'header file, contenente le direttive \texttt{\#define} ed il prototipo della funzione \texttt{printf}-like sopra citate, all'interno della directory \texttt{/usr/local/include/mfdf},
                         \item installare la libreria statica \texttt{libmfdfuser.a} all'interno della directory \texttt{/usr/local/lib/mfdf},
-                        \item comprimere utilizzando \texttt{gunzip} la manpage generata dalla regola \texttt{doc},
+                        \item comprimere, utilizzando \texttt{gunzip}, la manpage generata dalla regola \texttt{doc},
                         \item installare la manpage compressa all'interno della directory \texttt{/usr/local/share/man/man0p};
                 \end{itemize}
         \item \terminal{\$ make clean} è possibile rimuovere dalla directory locale ogni output prodotto dalle regole descritte in precedenza;
@@ -376,26 +380,31 @@ In definitiva dunque, per maggiori informazioni relativamente all'utilizzo della
         \item consultare la pagina di manuale utilizzando il comando \terminal{\$ man mfdf\_user.h}
 \end{itemize}
 
-Un esempio di utilizzo della libreria utente è riportato nel listato \ref{lst:demo} compilabile utilizzando come flags:
+Un esempio di utilizzo della libreria utente è riportato nel listato \ref{lst:demo}, compilabile utilizzando come flags:
 \begin{itemize}
-        \item \texttt{-L/usr/local/lib/mfdf} per aggiungere la directory a quelle ispezionate di default per individuare la libreria da linkare,
+        \item \texttt{-L/usr/local/lib/mfdf} per aggiungere la directory a quelle ispezionate di default per individuare le libreria da linkare,
         \item \texttt{-lmfdfuser} per linkare effettivamente la libreria.
 \end{itemize}
 
 \section{Testing del modulo}
 Per testare il corretto funzionamento del modulo è stato utilizzato il file \texttt{SAMPLES/src/test-cases.c}. L'idea è stata quella di definire una struttura che rappresentasse il caso di test, ovvero la \texttt{struct test\_case} i cui campi sono:
 \begin{itemize}
-        \item il nome del test, per mostrarlo all'interno dell'interfaccia,
-        \item il function pointer della routine di test, il cui prototipo dev'esser del tipo \texttt{void T(int, int)}.
+        \item il nome del test, utile per l'attività di auditing,
+        \item il function pointer della routine di test, del tipo \texttt{void T(int, int)}.
 \end{itemize}
 
 Per cui all'interno del \texttt{main} non si fa altro che:
 \begin{enumerate}
-        \item reperire il minor number leggendolo tramite funzione apposita da \texttt{/sys},
-        \item invocare per ogni entry dell'array \texttt{test\_cases} (list: \ref{lst:test-cases}) la funzione \texttt{do\_test} responsabile dell'inizializzazione dell'ambiente, del cleanup e della stampa dei risultati.
+        \item reperire il minor number, leggendolo tramite funzione apposita da \texttt{/sys},
+        \item invocare, per ogni entry dell'array \texttt{test\_cases} (list: \ref{lst:test-cases}), la funzione \texttt{do\_test} responsabile:
+                \begin{itemize}
+                        \item dell'inizializzazione dell'ambiente,
+                        \item del cleanup dell'ambiente,
+                        \item della stampa dei risultati.
+                \end{itemize}
 \end{enumerate}
 
-In compilazione è possibile abilitare o meno la modalità \texttt{VERBOSE} per mostrare, per ciascun caso di test, valore atteso e valore attuale, mediante il comando \terminal{\$ make MORE\_FLAGS=-DVERBOSE}.
+In compilazione, è possibile abilitare o meno la modalità \texttt{VERBOSE} al fine di mostrare, per ciascun caso di test, \textit{expected} e \textit{actual values}, mediante il comando \terminal{\$ make MORE\_FLAGS=-DVERBOSE}.
 
 \appendix
 \section{Codici citati all'interno del report}
