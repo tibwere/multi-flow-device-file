@@ -107,7 +107,7 @@ static int __always_inline is_it_possible_to_read(struct data_flow *flow)
  *
  * @kobj: kernel object (/sys/kernel/mfdf)
  * @attr: kernel attribute (/sys/kernel/mfdf/standing_bytes)
- * @buff: buffer in which to store the requested data
+ * @buf: buffer in which to store the requested data
  */
 static ssize_t sb_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
 {
@@ -136,7 +136,7 @@ static ssize_t sb_show(struct kobject *kobj, struct kobj_attribute *attr, char *
  *
  * @kobj: kernel object (/sys/kernel/mfdf)
  * @attr: kernel attribute (/sys/kernel/mfdf/standing_threads)
- * @buff: buffer in which to store the requested data
+ * @buf: buffer in which to store the requested data
  */
 static ssize_t st_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
 {
@@ -267,11 +267,10 @@ static int mfdf_release(struct inode *inode, struct file *filp)
  * Second function of the chain of invocations for writing on low priority flow.
  * Prepare the metadata needed by the kworker by packing them in a special structure
  *
- * @flow:  current flow
- * @queue: "single threaded" work queue in which to append the deferred write
- * @filp:  pointed by the entry of FDT
- * @buff:  user buffer containing the data to be written
- * @len:   length required to write
+ * @flow:     current flow
+ * @new_data: data segment to add
+ * @filp:     pointed by the entry of FDT
+ * @flags:    flag for memory allocation
  */
 static int trigger_deferred_work(struct data_flow *flow, struct data_segment *new_data, struct file *filp, gfp_t flags)
 {
@@ -409,7 +408,7 @@ static ssize_t mfdf_write(struct file *filp, const char __user *buff, size_t len
  * @buff: user buffer containing the data to be written
  * @len:  size required
  */
-static int do_effective_read(struct data_flow *flow, char __user *buff, size_t len, int is_block)
+static int do_effective_read(struct data_flow *flow, char __user *buff, size_t len)
 {
         int residual;
         size_t read_bytes, current_readable_bytes, current_read_len;
@@ -500,7 +499,7 @@ static ssize_t mfdf_read(struct file *filp, char __user *buff, size_t len, loff_
         if (unlikely(active_flow->valid_bytes == 0))
                 retval = -EAGAIN;
         else
-                retval = do_effective_read(active_flow, buff, len, is_block_read(filp));
+                retval = do_effective_read(active_flow, buff, len);
 
         mutex_unlock(&(active_flow->mu));
         wake_up_interruptible(&(active_flow->pending_requests));
@@ -552,7 +551,7 @@ static long mfdf_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
                         set_write_modality(filp, arg);
                         return 0;
                 case MFDF_IOCTL_SET_TOUT:
-                        if (arg > MAX_JIFFIES)
+                        if (arg > MAX_SECONDS)
                                 return -EINVAL;
 
                         pr_debug("%s thread %d used an ioctl on %s device [MAJOR: %d, minor: %d] to set timeout for blocking operations to %ld",
@@ -683,6 +682,11 @@ static int __init mfdf_initialize(void)
 }
 
 
+/**
+ * Releases the memory and destroys the workqueue relating to the i-th device
+ *
+ * @minor: i-th device
+ */
 static void cleanup_device(int minor)
 {
         int i;
@@ -719,6 +723,7 @@ static void __exit mfdf_cleanup(void)
         kobject_put(mfdf_sys_kobj);
         pr_debug("%s multi flow device file unregistered (MAJOR number: %d)\n", MODNAME, major);
 }
+
 
 /* Things related to module management */
 module_param_cb(major, &major_ops, &major, S_IRUSR | S_IRGRP);
