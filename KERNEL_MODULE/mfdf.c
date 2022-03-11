@@ -11,7 +11,7 @@
 /* Major number associated with the device */
 int major;
 /* Flag to enable the granularity of the minor number */
-int enable[MINORS] = {[0 ... (MINORS-1)] = 1};
+bool enable[MINORS] = {[0 ... (MINORS-1)] = 1};
 /* Array of struct device_state to keep track of the state of devices */
 static struct device_state devs[MINORS];
 
@@ -727,7 +727,7 @@ static void __exit mfdf_cleanup(void)
 
 /* Things related to module management */
 module_param_cb(major, &major_ops, &major, S_IRUSR | S_IRGRP);
-module_param_array(enable, int, NULL, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+module_param_array(enable, bool, NULL, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Simone Tiberi <simone.tiberi.98@gmail.com>");
