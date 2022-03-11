@@ -55,6 +55,41 @@ void *read_worker(void *argptr)
 /********************************************************************
  ************************* START TEST CASES *************************
  ********************************************************************/
+int __test_read_part_of_segment(int fd, int prio)
+{
+        int ret;
+        char actual[16];
+        const char *expected = "12345678";
+        memset(actual, 0x0, 16);
+
+        mfdf_set_priority(fd, prio);
+
+        mfdf_printf(fd, expected);
+        ret = mfdf_read(fd, actual, 4);
+        mfdf_read(fd, actual + ret, 4);
+
+#ifdef VERBOSE
+        printf("READS RESULT [expected: \"%s\" -> actual: \"%s\"]\n", expected, actual);
+#endif
+
+        return strcmp(expected, actual) == 0;
+}
+
+
+int test_read_part_of_segment_low(int fd, __attribute__ ((unused)) int minor)
+{
+        return __test_read_part_of_segment(fd, LOW_PRIO);
+
+}
+
+
+int test_read_part_of_segment_high(int fd, __attribute__ ((unused)) int minor)
+{
+        return __test_read_part_of_segment(fd, HIGH_PRIO);
+
+}
+
+
 int test_immutable_major_from_sys(__attribute__ ((unused)) int fd, __attribute__ ((unused)) int minor)
 {
         int ret, sys_fd;
@@ -417,6 +452,8 @@ static struct test_case test_cases[] = {
         {"Standing threads (HIGH)",                 test_standing_threads_high},
         {"Subsequent writes on low priority",       test_subsequent_low_writes},
         {"Immutable major from /sys pseudo file",   test_immutable_major_from_sys},
+        {"Read a segment in two steps (LOW)",       test_read_part_of_segment_low},
+        {"Read a segment in two steps (HIGH)",      test_read_part_of_segment_high},
         {NULL, NULL}
 };
 /********************************************************************
