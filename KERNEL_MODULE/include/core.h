@@ -5,12 +5,12 @@
 #include <vdso/limits.h>   // for ULONG_MAX constant
 
 /* "Constants" macros */
-#define MODNAME "MFDF:"          // Module name, useful for printk
-#define DEVICE_NAME "multi-flow" // Device name, useful for printk
-#define MINORS (128)             // Number of minors available
-#define BUFSIZE (2*PAGE_SIZE)    // Size of each data flow
-#define SYS_KOBJ_NAME "mfdf"     // Kernel object name (directory in /sys)
-#define MAX_JIFFIES (ULONG_MAX / CONFIG_HZ)
+#define MODNAME "MFDF:"                         // Module name, useful for printk
+#define DEVICE_NAME "multi-flow"                // Device name, useful for printk
+#define MINORS (128)                            // Number of minors available
+#define BUFSIZE (2*PAGE_SIZE)                   // Size of each data flow
+#define SYS_KOBJ_NAME "mfdf"                    // Kernel object name (directory in /sys)
+#define MAX_SECONDS (ULONG_MAX / CONFIG_HZ)     // Maximum number of seconds that can be set with the ioctl
 
 
 /**
