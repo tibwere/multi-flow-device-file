@@ -12,7 +12,7 @@ build:
 doc:
 	pandoc mfdf_user.h.0p.md -s -t man -o mfdf_user.h.0p
 
-install: build doc
+install:
 	mkdir -p $(GLOBALLIB)
 	mkdir -p $(GLOBALMAN)
 	install -m 644 user.h $(GLOBALHDR)/user.h
