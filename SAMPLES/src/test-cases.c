@@ -229,6 +229,9 @@ int __test_standing_bytes(int fd, int minor, int prio)
         mfdf_set_priority(fd, prio);
         ret = mfdf_printf(fd, "MESSAGE");
 
+        // In machines with a low CPU number, it facilitates the entry into execution of the kworker
+        sleep(WAIT_TIME);
+
         if((sysfd = open(STANDING_BYTES_SYS, O_RDONLY)) == -1)
                 return -1;
 
