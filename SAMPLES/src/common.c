@@ -29,5 +29,5 @@ int init_test_environment(const char * name, int major, int minor)
         if(mknod(name, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH | S_IFCHR, makedev(major, minor)))
                 return -1;
 
-        return mfdf_open(name, MFDF_READ_WRITE);
+        return mfdf_open(name, O_RDWR);
 }

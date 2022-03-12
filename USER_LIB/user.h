@@ -15,11 +15,6 @@
  */
 
 
-#define KEEP_PRIO       (-1)
-#define MFDF_READ_ONLY  (O_RDONLY)
-#define MFDF_WRITE_ONLY (O_WRONLY)
-#define MFDF_READ_WRITE (O_RDWR)
-
 ssize_t mfdf_printf(int, const char *restrict, ...);
 
 #define mfdf_open(path, flags)                  open(path, flags)

@@ -72,7 +72,7 @@ int test_open_not_enabled(__attribute__ ((unused)) int fd, int minor)
         if(write(sysfd, buff, strlen(buff)) == -1)
                 return -1;
 
-        ret = mfdf_open(TEST_DEV, MFDF_READ_WRITE);
+        ret = mfdf_open(TEST_DEV, O_RDWR);
 
         snprintf(buff + 2*minor, 2, "Y");
 

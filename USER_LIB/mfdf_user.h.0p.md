@@ -12,15 +12,6 @@ mfdf/user.h - Operations available for multi flow device files
 # DESCRIPTION
 Below is a brief description of what is in the mfdf/user.h library:
 
-- Constants
-
-        - KEEP_PRIO:       to be used in the invocation of mfdf_prio_printf to not change the currently active stream
-        - MFDF_READ_ONLY:  to be used to open device file in read-only mode (equiv. O_RDONLY)
-        - MFDF_WRITE_ONLY: to be used to open device file in read-only mode (equiv. O_WRONLY)
-        - MFDF_READ_WRITE: to be used to open device file in read-only mode (equiv. O_RDWR)
-
-- Functions and macros
-
         - ssize_t mfdf_printf(int fd, const char *restrict fmt, ...):   it writes in printf-like mode on the file associated with the descriptor fd
 
         - mfdf_open(path, flags):                                       equivalent to open(path, flags)
