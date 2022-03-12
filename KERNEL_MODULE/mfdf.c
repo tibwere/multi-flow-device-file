@@ -388,6 +388,9 @@ static ssize_t mfdf_write(struct file *filp, const char __user *buff, size_t len
 
                         return cleanup_data_segment_and_exit(the_data, EINTR);
                 }
+        } else {
+                if (!mutex_trylock(&(active_flow->mu)))
+                        return cleanup_data_segment_and_exit(the_data, EBUSY)                   ;
         }
 
         if (unlikely(writable_bytes(active_flow) == 0)) {
@@ -507,6 +510,9 @@ static ssize_t mfdf_read(struct file *filp, char __user *buff, size_t len, loff_
 
                         return -EINTR;
                 }
+        } else {
+                if (!mutex_trylock(&(active_flow->mu)))
+                        return -EBUSY;
         }
 
         retval = do_effective_read(active_flow, buff, len);
