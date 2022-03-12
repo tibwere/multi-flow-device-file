@@ -172,10 +172,12 @@ static ssize_t forbidden_store(struct kobject *kobj, struct kobj_attribute *attr
  *      - directly from mfdf_write in the synchronous case
  *      - from the write_on_buffer, executed by the kworker, in the asynchronous case
  *
+ * Returns the number of bytes written to the stream
+ *
  * @new_data: new data segment
  * @flow:     current flow
  */
-static void __always_inline do_the_linkage(struct data_segment *new_data, struct data_flow *flow)
+static size_t __always_inline do_the_linkage(struct data_segment *new_data, struct data_flow *flow)
 {
         struct list_head *curr, *tail;
 
@@ -189,6 +191,8 @@ static void __always_inline do_the_linkage(struct data_segment *new_data, struct
         tail->prev = curr;
 
         flow->valid_bytes += new_data->size;
+
+        return new_data->size;
 }
 
 
@@ -205,8 +209,7 @@ static void deferred_write(unsigned long data)
                MODNAME, current->pid, DEVICE_NAME, the_task->major, the_task->minor);
 
         mutex_lock(&(the_task->active_flow->mu));
-        do_the_linkage(the_task->new_data, the_task->active_flow);
-        the_task->active_flow->pending_bytes -= the_task->new_data->size;
+        the_task->active_flow->pending_bytes -= do_the_linkage(the_task->new_data, the_task->active_flow);
         mutex_unlock(&(the_task->active_flow->mu));
 
         wake_up_interruptible(&(the_task->active_flow->pending_requests));
@@ -278,20 +281,14 @@ static int trigger_deferred_work(struct data_flow *flow, struct data_segment *ne
         struct workqueue_struct *queue;
         int retval;
 
-        if(!try_module_get(THIS_MODULE)) {
-                kfree(new_data->buffer);
-                kfree(new_data);
+        if(!try_module_get(THIS_MODULE))
                 return -ENODEV;
-        }
 
         queue = devs[get_minor(filp)].queue;
 
         the_task = (struct work_metadata *)kzalloc(sizeof(struct work_metadata), flags);
-        if(unlikely(the_task == NULL)) {
-                kfree(new_data->buffer);
-                kfree(new_data);
+        if(unlikely(the_task == NULL))
                 return -ENOMEM;
-        }
 
         the_task->major = get_major(filp);
         the_task->minor = get_minor(filp);
@@ -303,7 +300,27 @@ static int trigger_deferred_work(struct data_flow *flow, struct data_segment *ne
         __INIT_WORK(&(the_task->the_work),(void*)deferred_write,(unsigned long)(&(the_task->the_work)));
         queue_work(queue, &the_task->the_work);
 
+        flow->pending_bytes += retval;
         return retval;
+}
+
+
+/**
+ * Auxiliary function of the mfdf_write responsible
+ * for the invocation of the kfree on the buffers
+ * allocated through SLAB
+ *
+ * @to_be_released: data_segment to be released
+ * @error:          error code to be returned to the user in errno
+ */
+static ssize_t __always_inline cleanup_data_segment_and_exit(struct data_segment *to_be_released, ssize_t error)
+{
+        if (likely(to_be_released->buffer != NULL))
+                kfree(to_be_released->buffer);
+
+        kfree(to_be_released);
+        pr_info("L'errore ricevuto come parametro è: %ld mentre io restituisco %ld",error, -error);
+        return -error;
 }
 
 
@@ -336,10 +353,8 @@ static ssize_t mfdf_write(struct file *filp, const char __user *buff, size_t len
                 return -ENOMEM;
 
         the_data->buffer = (char *)kzalloc(len, flags);
-        if (unlikely(the_data->buffer == NULL)) {
-                kfree(the_data);
-                return -ENOMEM;
-        }
+        if (unlikely(the_data->buffer == NULL))
+                return cleanup_data_segment_and_exit(the_data, ENOMEM);
 
         residual = copy_from_user(the_data->buffer, buff, len);
 
@@ -348,7 +363,7 @@ static ssize_t mfdf_write(struct file *filp, const char __user *buff, size_t len
                 mutex_lock(&(active_flow->mu));
         } else {
                 if (!mutex_trylock(&(active_flow->mu)))
-                        return -EBUSY;
+                        return cleanup_data_segment_and_exit(the_data, EBUSY);
         }
 
         if((writable_bytes(active_flow) == 0) && is_block_write(filp)) {
@@ -368,30 +383,30 @@ static ssize_t mfdf_write(struct file *filp, const char __user *buff, size_t len
                         mutex_unlock(&(active_flow->mu));
                         pr_debug("%s timer has expired for thread %d and it is not possible to write to the device %s [MAJOR: %d, minor: %d]",
                                  MODNAME, current->pid, DEVICE_NAME, get_major(filp), get_minor(filp));
-                        return -ETIME;
+
+                        return cleanup_data_segment_and_exit(the_data, ETIME);
                 } else if(retval == -ERESTARTSYS) {
                         mutex_unlock(&(active_flow->mu));
                         pr_debug("%s thread %d was hit with a signal while waiting for available space on device %s [MAJOR: %d, minor: %d]",
                                  MODNAME, current->pid, DEVICE_NAME, get_major(filp), get_minor(filp));
-                        return -EINTR;
+
+                        return cleanup_data_segment_and_exit(the_data, EINTR);
                 }
         }
 
         if (unlikely(writable_bytes(active_flow) == 0)) {
-                kfree(the_data->buffer);
-                kfree(the_data);
                 mutex_unlock(&(active_flow->mu));
-                return -EAGAIN;
+                return cleanup_data_segment_and_exit(the_data, EAGAIN);
         }
 
         the_data->size = MIN(len - residual, writable_bytes(active_flow));
         if (active_flow->prio_level == HIGH_PRIO) {
-                do_the_linkage(the_data, active_flow);
-                retval = the_data->size;
+                retval = do_the_linkage(the_data, active_flow);
         } else {
-                retval = trigger_deferred_work(active_flow, the_data, filp, flags);
-                if (retval > 0)
-                        active_flow->pending_bytes += retval;
+                if ((retval = trigger_deferred_work(active_flow, the_data, filp, flags)) < 0) {
+                        mutex_unlock(&(active_flow->mu));
+                        return cleanup_data_segment_and_exit(the_data, -retval);
+                }
         }
 
         mutex_unlock(&(active_flow->mu));
