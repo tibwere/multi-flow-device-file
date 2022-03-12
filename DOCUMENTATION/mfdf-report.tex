@@ -206,19 +206,13 @@ La \texttt{mfdf\_open}, ovvero l'implementazione all'interno del driver dell'ope
 La \texttt{mfdf\_release}, ovvero l'implementazione all'interno del driver dell'operazione di rilascio, essendo duale dell'apertura, si limita a liberare il buffer allocato per la memorizzazione dei metadati relativi alla sessione.
 
 \subsubsection{Scrittura (\texttt{write})}
-Nella \texttt{mfdf\_write}, ovvero l'implementazione all'interno del driver dell'operazione di scrittura, per prima cosa si \textit{pre-alloca} la struttura \texttt{data\_segment} in cui scrivere i dati richiesti, per minimizzare la dimensione della sezione critica.
-
-È opportuno osservare che in funzione della modalità di scrittura selezionata nella sessione:
-\begin{itemize}
-        \item vengono impostati i flag per la richiesta di memoria (\texttt{GFP\_ATOMIC} o \texttt{GFP\_KERNEL}),
-        \item viene utilizzata la \texttt{mutex\_trylock} piuttosto che la \texttt{mutex\_lock}.
-\end{itemize}
+Nella \texttt{mfdf\_write}, ovvero l'implementazione all'interno del driver dell'operazione di scrittura, per prima cosa si \textit{pre-alloca} la struttura \texttt{data\_segment} in cui scrivere i dati richiesti, per minimizzare la dimensione della sezione critica. È opportuno osservare che in funzione della modalità di scrittura selezionata nella sessione vengono impostati i flag per la richiesta di memoria (\texttt{GFP\_ATOMIC} o \texttt{GFP\_KERNEL}).
 
 Si passa poi ad eseguire un blocco di codice responsabile di mandare eventualmente \textit{a dormire} i thread che effettuano richieste bloccanti non soddisfacibili. L'iter seguito è il seguente:
 \begin{enumerate}
         \item si incrementa atomicamente il numero di thread pendenti,
         \item si passa allo stato \texttt{TASK\_INTERRUPTIBLE} tramite la \texttt{wait\_event\_interruptible\_timeout}. Il controllo per il risveglio viene effettuato invocando una funzione che:\begin{enumerate}
-                \item prende il lock,
+                \item tenta di prendere il lock,
                 \item effettua il controllo,
                 \item in caso positivo ritorna \texttt{TRUE} \textbf{senza rilasciare il lock}\footnote{Questo garantisce che una volta ripreso il controllo, in caso di successo dell'API nessuno può aver modificato lo stato del flusso.} altrimenti rilascia il lock e torna \texttt{FALSE}
         \end{enumerate}
@@ -266,9 +260,7 @@ L'unica alternativa a ciò, si verifica in casi \textit{transienti} come la time
 \end{enumerate}
 
 \subsubsection{Lettura (\texttt{read})}
-Nella \texttt{mfdf\_read}, ovvero l'implementazione all'interno del driver dell'operazione di lettura, per prima cosa si prende il lock per effettuare le operazioni, ancora una volta in modo bloccante (\texttt{lock}) o meno (\texttt{try\_lock}) a seconda della modalità correntemente selezionata.
-
-Dopodiché si entra all'interno del blocco di codice responsabile eventualmente di \textit{mandare a dormire} il thread richiedente, del tutto equivalente a quello descritto per la \texttt{mfdf\_write}.
+Nella \texttt{mfdf\_read}, ovvero l'implementazione all'interno del driver dell'operazione di lettura, per prima cosa si entra all'interno del blocco di codice responsabile eventualmente di \textit{mandare a dormire} il thread richiedente, del tutto equivalente a quello descritto per la \texttt{mfdf\_write}.
 
 Si invoca poi una funzione responsabile di realizzare l'effettiva lettura dei dati dalla lista di strutture \texttt{data\_segment} collegate al flusso.
 
