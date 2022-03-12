@@ -360,7 +360,7 @@ static ssize_t mfdf_write(struct file *filp, const char __user *buff, size_t len
 
         residual = copy_from_user(the_data->buffer, buff, len);
         if (unlikely(residual == len))
-                return cleanup_data_segment_and_exit(the_data, EFAULT);
+                return cleanup_data_segment_and_exit(the_data, ENOMEM);
 
         if(is_block_write(filp)) {
                 pr_debug("%s thread %d is waiting for space available for writing on the device %s [MAJOR: %d, minor: %d]",

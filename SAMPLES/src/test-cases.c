@@ -27,7 +27,7 @@
 #define ROW_LEN 81
 #define STANDING_ROW_LEN 14
 #define WAIT_TIME 3
-#define NON_BLOCK_VALID_ERRNO ((errno == EBUSY) || (errno == ENODEV) || (errno == EAGAIN) || (errno == ENOMEM))
+#define NON_BLOCK_VALID_ERRNO ((errno == ENODEV) || (errno == EAGAIN) || (errno == ENOMEM))
 
 struct test_case {
         const char *name;
