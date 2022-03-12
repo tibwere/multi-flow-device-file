@@ -63,13 +63,14 @@ static int __always_inline writable_bytes(struct data_flow *flow)
  */
 static int __always_inline is_it_possible_to_write(struct data_flow *flow)
 {
-        mutex_lock(&(flow->mu));
-        if(unlikely(writable_bytes(flow) == 0)) {
-                mutex_unlock(&(flow->mu));
-                return 0;
+        if(mutex_trylock(&(flow->mu))) {
+                if(writable_bytes(flow) == 0) {
+                        mutex_unlock(&(flow->mu));
+                        return 0;
+                }
+                return 1;
         }
-
-        return 1;
+        return 0;
 }
 
 
@@ -88,13 +89,14 @@ static int __always_inline is_it_possible_to_write(struct data_flow *flow)
  */
 static int __always_inline is_it_possible_to_read(struct data_flow *flow)
 {
-        mutex_lock(&(flow->mu));
-        if(unlikely(flow->valid_bytes == 0)) {
-                mutex_unlock(&(flow->mu));
-                return 0;
+        if (mutex_trylock(&(flow->mu))) {
+                if(flow->valid_bytes == 0) {
+                        mutex_unlock(&(flow->mu));
+                        return 0;
+                }
+                return 1;
         }
-
-        return 1;
+        return 0;
 }
 
 
@@ -357,17 +359,10 @@ static ssize_t mfdf_write(struct file *filp, const char __user *buff, size_t len
                 return cleanup_data_segment_and_exit(the_data, ENOMEM);
 
         residual = copy_from_user(the_data->buffer, buff, len);
+        if (unlikely(residual == len))
+                return cleanup_data_segment_and_exit(the_data, EFAULT);
 
-
-        if (is_block_write(filp)) {
-                mutex_lock(&(active_flow->mu));
-        } else {
-                if (!mutex_trylock(&(active_flow->mu)))
-                        return cleanup_data_segment_and_exit(the_data, EBUSY);
-        }
-
-        if((writable_bytes(active_flow) == 0) && is_block_write(filp)) {
-                mutex_unlock(&(active_flow->mu));
+        if(is_block_write(filp)) {
                 pr_debug("%s thread %d is waiting for space available for writing on the device %s [MAJOR: %d, minor: %d]",
                        MODNAME, current->pid, DEVICE_NAME , get_major(filp), get_minor(filp));
 
@@ -379,14 +374,15 @@ static ssize_t mfdf_write(struct file *filp, const char __user *buff, size_t len
                         );
                 atomic_dec(&(active_flow->pending_threads));
 
+                pr_debug("%s thread %d has woken up from wait queue related to the device %s [MAJOR: %d, minor: %d]",
+                         MODNAME, current->pid, DEVICE_NAME , get_major(filp), get_minor(filp));
+
                 if(retval == 0) {
-                        mutex_unlock(&(active_flow->mu));
                         pr_debug("%s timer has expired for thread %d and it is not possible to write to the device %s [MAJOR: %d, minor: %d]",
                                  MODNAME, current->pid, DEVICE_NAME, get_major(filp), get_minor(filp));
 
                         return cleanup_data_segment_and_exit(the_data, ETIME);
                 } else if(retval == -ERESTARTSYS) {
-                        mutex_unlock(&(active_flow->mu));
                         pr_debug("%s thread %d was hit with a signal while waiting for available space on device %s [MAJOR: %d, minor: %d]",
                                  MODNAME, current->pid, DEVICE_NAME, get_major(filp), get_minor(filp));
 
@@ -430,6 +426,9 @@ static int do_effective_read(struct data_flow *flow, char __user *buff, size_t l
         struct data_segment *curr;
         struct list_head *head;
 
+        if (unlikely(flow->valid_bytes == 0))
+                return -EAGAIN;
+
         read_bytes = 0;
 
         head = &(flow->head);
@@ -439,6 +438,7 @@ static int do_effective_read(struct data_flow *flow, char __user *buff, size_t l
                 current_read_len = MIN(len - read_bytes, current_readable_bytes);
 
                 residual = copy_to_user(buff + read_bytes, &(curr->buffer[curr->off]), current_read_len);
+
                 read_bytes += (current_read_len - residual);
                 curr->off += (current_read_len - residual);
 
@@ -449,6 +449,9 @@ static int do_effective_read(struct data_flow *flow, char __user *buff, size_t l
                         kfree(curr->buffer);
                         kfree(curr);
                 }
+
+                if (unlikely(residual != 0))
+                        break;
         }
 
         flow->valid_bytes -= read_bytes;
@@ -479,14 +482,6 @@ static ssize_t mfdf_read(struct file *filp, char __user *buff, size_t len, loff_
         active_flow = get_active_flow(filp);
 
         if (is_block_read(filp)) {
-                mutex_lock(&(active_flow->mu));
-        } else {
-                if (!mutex_trylock(&(active_flow->mu)))
-                        return -EBUSY;
-        }
-
-        if ((active_flow->valid_bytes == 0) && is_block_read(filp)) {
-                mutex_unlock(&(active_flow->mu));
                 pr_debug("%s thread %d is waiting for bytes to read from device %s [MAJOR: %d, minor: %d]",
                        MODNAME, current->pid, DEVICE_NAME , get_major(filp), get_minor(filp));
 
@@ -498,23 +493,23 @@ static ssize_t mfdf_read(struct file *filp, char __user *buff, size_t len, loff_
                         );
                 atomic_dec(&(active_flow->pending_threads));
 
+                pr_debug("%s thread %d has woken up from wait queue related to the device %s [MAJOR: %d, minor: %d]",
+                         MODNAME, current->pid, DEVICE_NAME , get_major(filp), get_minor(filp));
+
                 if(retval == 0) {
-                        mutex_unlock(&(active_flow->mu));
                         pr_debug("%s timer has expired for thread %d and it is not possible to read from the device %s [MAJOR: %d, minor: %d]",
                                  MODNAME, current->pid, DEVICE_NAME, get_major(filp), get_minor(filp));
+
                         return -ETIME;
                 } else if(retval == -ERESTARTSYS) {
-                        mutex_unlock(&(active_flow->mu));
                         pr_debug("%s thread %d was hit with a signal while waiting for bytes to read on device %s [MAJOR: %d, minor: %d]",
                                  MODNAME, current->pid, DEVICE_NAME, get_major(filp), get_minor(filp));
+
                         return -EINTR;
                 }
         }
 
-        if (unlikely(active_flow->valid_bytes == 0))
-                retval = -EAGAIN;
-        else
-                retval = do_effective_read(active_flow, buff, len);
+        retval = do_effective_read(active_flow, buff, len);
 
         mutex_unlock(&(active_flow->mu));
         wake_up_interruptible(&(active_flow->pending_requests));
