@@ -5,7 +5,7 @@ GLOBALLIB = /usr/local/lib/mfdf
 GLOBALHDR = /usr/local/include/mfdf
 GLOBALMAN = /usr/local/share/man/man0p
 
-build:
+build: doc
 	$(CC) -c user.c -o user.o $(CFLAGS)
 	$(ARC) libmfdfuser.a user.o
 
