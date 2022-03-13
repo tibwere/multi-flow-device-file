@@ -10,10 +10,10 @@
 
 int main()
 {
-        char buff[4096];
+        char buff[MFDF_MAX_FLOW_SIZE];
         int ret, fd, major;
 
-        memset(buff, 0x0, 4096);
+        memset(buff, 0x0, MFDF_MAX_FLOW_SIZE);
         // get major number from /sys
         major = get_major_number();
 
@@ -34,7 +34,7 @@ int main()
 
         // it reads what is written on the same flow in which
         // the writing took place previously
-        if ((ret = mfdf_read(fd, buff, 4096)) == -1) {
+        if ((ret = mfdf_read(fd, buff, MFDF_MAX_FLOW_SIZE)) == -1) {
                 fprintf(stderr, "Read error (errcode: %d)\n", errno);
                 return 1;
         }
