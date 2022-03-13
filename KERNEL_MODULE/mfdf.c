@@ -235,7 +235,7 @@ static int mfdf_open(struct inode *inode, struct file *filp)
                MODNAME, current->pid, DEVICE_NAME, get_major(filp), get_minor(filp));
 
         minor = get_minor(filp);
-        if (!enable[minor])
+        if (unlikely(!enable[minor]))
                 return -EAGAIN;
 
         filp->private_data = (struct session_metadata *)kzalloc(sizeof(struct session_metadata), GFP_KERNEL);
@@ -321,7 +321,6 @@ static ssize_t __always_inline cleanup_data_segment_and_exit(struct data_segment
                 kfree(to_be_released->buffer);
 
         kfree(to_be_released);
-        pr_info("L'errore ricevuto come parametro è: %ld mentre io restituisco %ld",error, -error);
         return -error;
 }
 
@@ -391,11 +390,11 @@ static ssize_t mfdf_write(struct file *filp, const char __user *buff, size_t len
         } else {
                 if (!mutex_trylock(&(active_flow->mu)))
                         return cleanup_data_segment_and_exit(the_data, EBUSY)                   ;
-        }
 
-        if (unlikely(writable_bytes(active_flow) == 0)) {
-                mutex_unlock(&(active_flow->mu));
-                return cleanup_data_segment_and_exit(the_data, EAGAIN);
+                if (unlikely(writable_bytes(active_flow) == 0)) {
+                        mutex_unlock(&(active_flow->mu));
+                        return cleanup_data_segment_and_exit(the_data, EAGAIN);
+                }
         }
 
         the_data->size = MIN(len - residual, writable_bytes(active_flow));
@@ -404,6 +403,8 @@ static ssize_t mfdf_write(struct file *filp, const char __user *buff, size_t len
         } else {
                 if ((retval = trigger_deferred_work(active_flow, the_data, filp, flags)) < 0) {
                         mutex_unlock(&(active_flow->mu));
+                        // It gives the possibility to other threads to try to write
+                        wake_up_interruptible(&(active_flow->pending_requests));
                         return cleanup_data_segment_and_exit(the_data, -retval);
                 }
         }
@@ -680,17 +681,17 @@ static int __init mfdf_initialize(void)
                 return -ENOMEM;
 
         major = __register_chrdev(0, 0, MINORS, DEVICE_NAME, &fops);
-        if (major < 0) {
+        if (unlikely(major < 0)) {
                 pr_debug("%s registering multi-flow device file failed\n", MODNAME);
                 return major;
         }
 
 
         mfdf_sys_kobj = kobject_create_and_add(SYS_KOBJ_NAME, kernel_kobj);
-	if(!mfdf_sys_kobj)
+	if(unlikely(!mfdf_sys_kobj))
 		return -ENOMEM;
 
-	if(sysfs_create_group(mfdf_sys_kobj, &attr_group))
+	if(unlikely(sysfs_create_group(mfdf_sys_kobj, &attr_group)))
 		kobject_put(mfdf_sys_kobj);
 
         pr_debug("%s multi flow device file registered (MAJOR number: %d)\n", MODNAME, major);
