@@ -12,6 +12,7 @@ mfdf/user.h - Operations available for multi flow device files
 # DESCRIPTION
 Below is a brief description of what is in the mfdf/user.h library:
 
+        - MFDF_MAX_FLOW_SIZE                                            maximum number of bytes writable in a stream
         - ssize_t mfdf_printf(int fd, const char *restrict fmt, ...):   it writes in printf-like mode on the file associated with the descriptor fd
 
         - mfdf_open(path, flags):                                       equivalent to open(path, flags)

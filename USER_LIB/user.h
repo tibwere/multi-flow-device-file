@@ -14,6 +14,7 @@
  *              $ man mfdf_user.h
  */
 
+#define MFDF_MAX_FLOW_SIZE (8192)
 
 ssize_t mfdf_printf(int, const char *restrict, ...);
 

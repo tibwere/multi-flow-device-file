@@ -14,13 +14,13 @@
 ssize_t mfdf_printf(int fd, const char *restrict format, ...)
 {
         ssize_t ret;
-        char buff[4096];
+        char buff[MFDF_MAX_FLOW_SIZE];
 
-        memset(buff, 0x0, 4096);
+        memset(buff, 0x0, MFDF_MAX_FLOW_SIZE);
 
         va_list args;
         va_start(args, format);
-        vsnprintf(buff, 4096, format, args);
+        vsnprintf(buff, MFDF_MAX_FLOW_SIZE, format, args);
         ret = write(fd,buff,strlen(buff));
         va_end(args);
         return ret;
