@@ -230,7 +230,7 @@ Dopodiché si effettua realmente la scrittura:
         \item nel caso \texttt{LOW\_PRIO} schedulando il deferred work. A tal proposito in fig. \ref{fig:deferred_work} è riportata la relazione che sussiste fra le strutture in gioco.
 \end{itemize}
 
-A livello implementativo, è stato scelto di utilizzare una work queue privata \textit{single threaded} per garantire l'ordinamento FIFO. Questo perché la linearizzazione temporale delle scritture del buffer avviene prendendo come punto di riferimento l'istante di inserimento in coda (i.e. non è possibile che se il thread $T_1$ inserisce in coda una scrittura \textbf{prima} del thread $T_2$, questa venga effettivamente scritta sul flusso \textbf{prima} della precedente).
+A livello implementativo, è stato scelto di utilizzare una work queue privata \textit{single threaded} per garantire l'ordinamento FIFO. Questo perché la linearizzazione temporale delle scritture sul flusso avviene prendendo come punto di riferimento l'istante di inserimento in coda (i.e. non è possibile che se il thread $T_1$ inserisce in coda una scrittura \textbf{prima} del thread $T_2$, questa venga effettivamente scritta sul flusso \textbf{prima} di quella di $T_1$).
 
 L'allocazione delle code \textit{single threaded} è stata realizzata in modo differente a seconda della versione del kernel Linux correntemente in esercizio:
 \begin{itemize}
@@ -299,7 +299,7 @@ All'interno del VFS \texttt{sys} sono esposte diverse informazioni associate all
         \item il valore del major number, utile per lo script di generazione di nodi e per la fase di testing (read only),
         \item l'array dei flag di abilitazione dei devices (read/write),
         \item il numero di byte standing nei due flussi per ogni dispositivo (read only),
-        \item il numero di byte standing threads nei due flussi per ogni dispositivo (read only).
+        \item il numero di standing threads nei due flussi per ogni dispositivo (read only).
 \end{itemize}
 
 In particolare, per evitare che il major number venga modificato in maniera illegittima (e.g. cambiando manualmente i privilegi associati al file), anziché adottare la macro \texttt{module\_param} è stata utilizzata la versione con il callback esplicito, andando a porre come operazione \texttt{set} \texttt{NULL}.
@@ -354,7 +354,7 @@ Relativamente al Makefile presente nella directory, tramite la regola:
                         \item il file oggetto (\texttt{user.o}),
                         \item l'archivio utilizzabile dal linker (\texttt{libmfdfuser.a});
                 \end{itemize}
-        \item \terminal{\$ make doc} è possibile convertire il file markdown contenente il manuale della libreria utente nel formato delle manpages;
+        \item \terminal{\$ make doc} è possibile convertire il file markdown contenente il manuale della libreria utente nel formato delle manpages sfruttando \href{https://pandoc.org/}{\texttt{pandoc}};
         \item \terminal{\# make install} è possibile:
                 \begin{itemize}
                         \item installare l'header file, contenente le direttive \texttt{\#define} ed il prototipo della funzione \texttt{printf}-like sopra citate, all'interno della directory \texttt{/usr/local/include/mfdf},
@@ -368,18 +368,18 @@ Relativamente al Makefile presente nella directory, tramite la regola:
 
 In definitiva dunque, per maggiori informazioni relativamente all'utilizzo della libreria è possibile:
 \begin{itemize}
-        \item installarla, utilizzando il comando \terminal{\$ make \&\& make doc \&\& sudo make install},
+        \item installarla, utilizzando ad esempio il comando \terminal{\$ make \&\& sudo make install},
         \item consultare la pagina di manuale utilizzando il comando \terminal{\$ man mfdf\_user.h}
 \end{itemize}
 
 Un esempio di utilizzo della libreria utente è riportato nel listato \ref{lst:demo}, compilabile utilizzando come flags:
 \begin{itemize}
-        \item \texttt{-L/usr/local/lib/mfdf} per aggiungere la directory a quelle ispezionate di default per individuare le libreria da linkare,
+        \item \texttt{-L/usr/local/lib/mfdf} per aggiungere la directory a quelle ispezionate di default per individuare le librerie da linkare,
         \item \texttt{-lmfdfuser} per linkare effettivamente la libreria.
 \end{itemize}
 
 \section{Testing del modulo}
-Per testare il corretto funzionamento del modulo è stato utilizzato il file \texttt{SAMPLES/src/test-cases.c}. L'idea è stata quella di definire una struttura che rappresentasse il caso di test, ovvero la \texttt{struct test\_case} i cui campi sono:
+Per testare il corretto funzionamento del modulo è stato utilizzato il file \texttt{SAMPLES/src/test-cases.c}. L'idea è stata quella di definire una struttura che rappresentasse il caso di test, ovvero la \texttt{struct test\_case}, i cui campi sono:
 \begin{itemize}
         \item il nome del test, utile per l'attività di auditing,
         \item il function pointer della routine di test, del tipo \texttt{void T(int, int)}.
