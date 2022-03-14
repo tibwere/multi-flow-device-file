@@ -2,7 +2,6 @@
 #define __H_CORE__
 
 #include <linux/kconfig.h> // for CONFIG_HZ constant
-#include <vdso/limits.h>   // for ULONG_MAX constant
 
 /* "Constants" macros */
 #define MODNAME "MFDF:"                         // Module name, useful for printk
