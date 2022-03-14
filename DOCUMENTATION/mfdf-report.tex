@@ -354,7 +354,7 @@ Relativamente al Makefile presente nella directory, tramite la regola:
                         \item il file oggetto (\texttt{user.o}),
                         \item l'archivio utilizzabile dal linker (\texttt{libmfdfuser.a});
                 \end{itemize}
-        \item \terminal{\$ make doc} è possibile convertire il file markdown contenente il manuale della libreria utente nel formato delle manpages sfruttando \href{https://pandoc.org/}{\texttt{pandoc}};
+        \item \terminal{\# make doc} è possibile convertire il file markdown contenente il manuale della libreria utente nel formato delle manpages sfruttando \href{https://pandoc.org/}{\texttt{pandoc}};
         \item \terminal{\# make install} è possibile:
                 \begin{itemize}
                         \item installare l'header file, contenente le direttive \texttt{\#define} ed il prototipo della funzione \texttt{printf}-like sopra citate, all'interno della directory \texttt{/usr/local/include/mfdf},
@@ -368,7 +368,7 @@ Relativamente al Makefile presente nella directory, tramite la regola:
 
 In definitiva dunque, per maggiori informazioni relativamente all'utilizzo della libreria è possibile:
 \begin{itemize}
-        \item installarla, utilizzando ad esempio il comando \terminal{\$ make \&\& sudo make install},
+        \item installarla, utilizzando ad esempio il comando \terminal{\# make doc},
         \item consultare la pagina di manuale utilizzando il comando \terminal{\$ man mfdf\_user.h}
 \end{itemize}
 
